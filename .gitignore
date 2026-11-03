@@ -1,0 +1,7 @@
+/build*/
+/runs/
+__pycache__/
+test/
+tests/
+log/
+.vscode/
