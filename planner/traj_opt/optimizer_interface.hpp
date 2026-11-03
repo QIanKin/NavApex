@@ -18,6 +18,7 @@ public:
     const OptimizerParams &param() const;
 
 private:
+    std::shared_ptr<const PlanInput> input_;
     std::unique_ptr<Optimizer> optimizer_;
 };
 } // namespace traj_opt

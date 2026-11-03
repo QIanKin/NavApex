@@ -25,33 +25,9 @@ const char *CircleModel::type() const
     return "circle";
 }
 
-Space CircleModel::space() const
-{
-    return Space::Planar;
-}
-
 double CircleModel::radius() const
 {
     return radius_;
 }
 
-SphereModel::SphereModel(double radius) : radius_(radius)
-{
-    validateRadius(radius_);
-}
-
-const char *SphereModel::type() const
-{
-    return "sphere";
-}
-
-Space SphereModel::space() const
-{
-    return Space::Spatial;
-}
-
-double SphereModel::radius() const
-{
-    return radius_;
-}
 } // namespace robot_model

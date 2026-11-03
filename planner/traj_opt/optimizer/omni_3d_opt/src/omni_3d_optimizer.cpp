@@ -140,15 +140,6 @@ traj_opt::Result Omni_3d_Optimizer::optimize()
 
 bool Omni_3d_Optimizer::initializePlanning()
 {   
-    //check dimension
-    if (state_.input->inner_points.cols() + 1 != state_.input->durations.size())
-    {
-        LOGE(OPTIMIZER_TAG) << "init dimension mismatch" 
-                            << " points=" << state_.input->inner_points.cols()
-                            << " durations=" << state_.input->durations.size();
-        return false;
-    }
-
     state_.swarm_weight = param_.weights.swarm;
     state_.rebounds = 0;
     state_.evaluations = 0;

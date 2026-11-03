@@ -116,7 +116,7 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
                 for (int dz = -1; dz <= 1; ++dz)
                 {
                     if ((dx == 0 && dy == 0 && dz == 0) ||
-                        (map.space() == robot_model::Space::Planar && dz != 0))
+                        (map.space() == map::Space::Planar && dz != 0))
                         continue;
                     const Eigen::Vector3i next = index + Eigen::Vector3i(dx, dy, dz);
                     if ((next.array() < 1).any() || (next.array() >= cells - 1).any())
