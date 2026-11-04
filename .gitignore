@@ -5,3 +5,6 @@ test/
 tests/
 log/
 .vscode/
+/ros2_test/build/
+/ros2_test/install/
+/ros2_test/log/
