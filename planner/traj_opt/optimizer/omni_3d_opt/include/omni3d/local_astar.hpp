@@ -3,7 +3,7 @@
 #include <map/occupancy_map.hpp>
 #include <vector>
 
-namespace omni3d
+namespace traj_opt
 {
 enum class LocalSearchResult
 {
@@ -30,4 +30,4 @@ private:
     std::vector<Node> nodes_;
     unsigned generation_ = 0;
 };
-} // namespace omni3d
+} // namespace traj_opt

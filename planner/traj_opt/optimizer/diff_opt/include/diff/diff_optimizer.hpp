@@ -4,7 +4,7 @@
 #include <optimizer/base_optimizer.hpp>
 #include <params/diff_params.hpp>
 
-namespace diff
+namespace traj_opt
 {
 class Diff_Optimizer final : public traj_opt::Optimizer
 {
@@ -50,8 +50,8 @@ private:
     static int progressCallback(void *instance, const double *, const double *, double, double, double, double, int, int, int);
 
     traj_opt::DiffParams param_;
-    PlanningState state_;
+    DiffPlanningState state_;
 
     poly_traj::MinJerkOpt<3> minco_;
 };
-} // namespace diff
+} // namespace traj_opt

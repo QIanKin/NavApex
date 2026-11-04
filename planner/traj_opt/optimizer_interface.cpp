@@ -20,9 +20,9 @@ OptimizerInterface::OptimizerInterface(const std::string &type,
         throw std::invalid_argument("PlanInput must not be null");
     const auto path = std::filesystem::path(__FILE__).parent_path() / "config" / (type + ".json");
     if (type == "omni3d")
-        optimizer_ = std::make_unique<omni3d::Omni_3d_Optimizer>(Omni3DParams(path.string()), input_);
+        optimizer_ = std::make_unique<Omni_3d_Optimizer>(Omni3DParams(path.string()), input_);
     else
-        optimizer_ = std::make_unique<diff::Diff_Optimizer>(DiffParams(path.string()), input_);
+        optimizer_ = std::make_unique<Diff_Optimizer>(DiffParams(path.string()), input_);
 }
 
 Result OptimizerInterface::optimize()

@@ -8,7 +8,7 @@
 #include <tools/log.hpp>
 #include <utils/lbfgs.hpp>
 
-namespace omni3d
+namespace traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
@@ -904,4 +904,4 @@ void Omni_3d_Optimizer::roughlyCheckConstraintPoints()
         appendObstacleDirections(state_.sample_points, paths[i], segments[i], segments[i], false);
     state_.stop_reason = StopReason::Rebound;
 }
-} // namespace omni3d
+} // namespace traj_opt

@@ -6,7 +6,7 @@
 #include <queue>
 #include <tools/log.hpp>
 
-namespace omni3d
+namespace traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
@@ -137,4 +137,4 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
     LOGD(OPTIMIZER_TAG) << "local search no path";
     return LocalSearchResult::SearchError;
 }
-} // namespace omni3d
+} // namespace traj_opt

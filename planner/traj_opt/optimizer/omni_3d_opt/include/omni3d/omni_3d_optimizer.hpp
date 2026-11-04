@@ -5,7 +5,7 @@
 #include <optimizer/base_optimizer.hpp>
 #include <params/omni_3d_params.hpp>
 
-namespace omni3d
+namespace traj_opt
 {
 class Omni_3d_Optimizer final : public traj_opt::Optimizer
 {
@@ -66,9 +66,9 @@ private:
     static int progressCallback(void *instance,const double *,const double *,double,double,double,double,int,int,int);
 
     traj_opt::Omni3DParams param_;
-    PlanningState state_;
+    Omni3DPlanningState state_;
 
     poly_traj::MinJerkOpt<3> minco_;
     LocalAStar local_search_;
 };
-} // namespace omni3d
+} // namespace traj_opt

@@ -5,9 +5,9 @@
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
-namespace omni3d
+namespace traj_opt
 {
-struct Cost
+struct Omni3DCost
 {
     double smoothness = 0;
     double time = 0;
@@ -44,7 +44,7 @@ enum class StopReason
     Error
 };
 
-struct PlanningState
+struct Omni3DPlanningState
 {
     std::shared_ptr<const traj_opt::PlanInput> input;
 
@@ -58,8 +58,8 @@ struct PlanningState
     int evaluations = 0;
     
     StopReason stop_reason = StopReason::None;
-    Cost evaluation_cost;
+    Omni3DCost evaluation_cost;
     std::vector<double> min_swarm_dist_sq;
 };
 
-} // namespace omni3d
+} // namespace traj_opt

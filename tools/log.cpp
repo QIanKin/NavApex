@@ -1,9 +1,12 @@
 #include "log.hpp"
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <ctime>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <g3log/logmessage.hpp>
 #include <g3log/logworker.hpp>
@@ -13,6 +16,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <system_error>
 #include <unistd.h>
 #include <utils/poly_traj_utils.hpp>
 
@@ -74,6 +78,25 @@ LEVELS g3Level(LogLevel level)
     }
 }
 
+std::string createLogPath(const std::filesystem::path &directory, const std::string &stem)
+{
+    for (std::size_t index = 0; ; ++index)
+    {
+        const auto suffix = index == 0 ? "" : "." + std::to_string(index);
+        const auto path = (directory / (stem + suffix + ".log")).string();
+        // 同一秒内多次启动时加序号；独占创建，避免覆盖已有日志。
+        const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        if (descriptor >= 0)
+        {
+            (void)::close(descriptor);
+            return path;
+        }
+        const int error = errno;
+        if (error != EEXIST)
+            throw std::system_error(error, std::generic_category(), "Cannot create log file: " + path);
+    }
+}
+
 /// 所有文件操作只在 sink 线程执行（首次创建除外）。
 class FileSink
 {
@@ -82,10 +105,11 @@ public:
         : path_(std::move(path)), config_(config)
     {
         std::ostringstream header;
-        header << "# planner_log_version=2\n# session_id=" << session
+        header << "# planner_log_version=3\n# session_id=" << session
                << " software_version=" << std::quoted(singleLine(config.software_version))
                << " system_version=" << std::quoted(singleLine(config.system_version)) << '\n'
-               << "# clock=unix_nanoseconds timezone=UTC units=SI numeric_precision=max_digits10\n"
+               << "# format=\"HH:MM:SS mmm(pid)level/tag: message\" timezone=local\n"
+               << "# replay_clock=unix_nanoseconds timezone=UTC units=SI numeric_precision=max_digits10\n"
                << "# escaping=backslash_newline_carriage_return\n"
                << "# trajectory_version=1 coefficient_order=descending_local_seconds"
                   " coefficient_layout=3x6_row_major axis_order=x,y,z\n";
@@ -100,20 +124,24 @@ public:
         {
             std::ostringstream line;
             line.imbue(std::locale::classic());
-            // 两种时间表示来自同一个采集时间，明确采用 UTC。
+            // 显示时间与回放时间使用同一个采集时间戳。
             const std::time_t seconds = timestamp / 1000000000;
-            std::tm utc{};
-            gmtime_r(&seconds, &utc);
-            line << "epoch_ns=" << timestamp << " seq=" << sequence
-                 << " time=" << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ")
-                 << " level=" << message.level()
-                 << " channel=" << (channel == LogChannel::Replay ? "replay" : "diagnostic")
-                 << " tag=" << std::quoted(singleLine(tag)) << " pid=" << getpid()
-                 << " tid=" << message.threadID()
-                 << " source=" << std::quoted(singleLine(message.file()))
-                 << " line=" << message.line()
-                 << " function=" << std::quoted(singleLine(message.function()))
-                 << " | " << singleLine(message.message()) << '\n';
+            const auto milliseconds = timestamp / 1000000 % 1000;
+            std::tm local{};
+            localtime_r(&seconds, &local);
+            line << std::put_time(&local, "%H:%M:%S") << ' '
+                 << std::setfill('0') << std::setw(3) << milliseconds
+                 << '(' << getpid() << ')' << message.level().front() << '/'
+                 << singleLine(tag) << ": ";
+            if (channel == LogChannel::Replay)
+            {
+                line << "epoch_ns=" << timestamp << " seq=" << sequence << " channel=replay"
+                     << " tid=" << message.threadID()
+                     << " source=" << std::quoted(singleLine(message.file()))
+                     << " line=" << message.line()
+                     << " function=" << std::quoted(singleLine(message.function())) << " | ";
+            }
+            line << singleLine(message.message()) << '\n';
             const auto record = line.str();
             if (file_bytes_ > header_.size() && file_bytes_ + record.size() > config_.max_file_bytes)
                 rotate();
@@ -282,8 +310,15 @@ private:
             throw std::invalid_argument("Invalid planner log configuration");
         const auto directory = std::filesystem::absolute(config.directory);
         std::filesystem::create_directories(directory);
-        const auto session = std::to_string(epochNanoseconds()) + "-" + std::to_string(getpid());
-        const auto path = (directory / (config.name + "." + session + ".log")).string();
+        const auto timestamp = epochNanoseconds();
+        const auto session = std::to_string(timestamp) + "-" + std::to_string(getpid());
+        const std::time_t seconds = timestamp / 1000000000;
+        std::tm local{};
+        localtime_r(&seconds, &local);
+        std::ostringstream name;
+        name.imbue(std::locale::classic());
+        name << config.name << '.' << std::put_time(&local, "%Y%m%d-%H%M%S");
+        const auto path = createLogPath(directory, name.str());
         auto worker = g3::LogWorker::createLogWorker();
         auto sink = worker->addSink(std::make_unique<FileSink>(path, config, session), &FileSink::receive);
         config_ = config;

@@ -6,7 +6,7 @@
 #include <tools/log.hpp>
 #include <utils/lbfgs.hpp>
 
-namespace diff
+namespace traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
@@ -107,7 +107,7 @@ bool Diff_Optimizer::initializePlanning()
     const auto &input = *state_.input;
     state_.swarm_weight = param_.weights.swarm;
     state_.evaluations = 0;
-    state_.stop_reason = StopReason::None;
+    state_.stop = false;
     state_.evaluation_cost = {};
     state_.piece_count = static_cast<int>(input.durations.size());
     state_.min_swarm_dist_sq.assign(input.neighbors.size(), std::numeric_limits<double>::infinity());
@@ -218,12 +218,12 @@ bool Diff_Optimizer::solveLbfgs(Eigen::VectorXd &variables)
     p.s_curv_coeff = config.s_curv_coeff;
     p.xtol = config.xtol;
     p.abs_curv_cond = config.abs_curv_cond;
-    state_.stop_reason = StopReason::None;
+    state_.stop = false;
     state_.evaluations = 0;
     const int code = planner_lbfgs::lbfgs_optimize(variables.size(), variables.data(), nullptr,
                                                    costFunctionCallback, nullptr,
                                                    progressCallback, this, &p);
-    if (state_.stop_reason == StopReason::Error)
+    if (state_.stop)
     {
         LOGW(OPTIMIZER_TAG) << "solver error stop";
         return false;
@@ -249,7 +249,7 @@ double Diff_Optimizer::costFunctionCallback(void *instance, const double *raw, d
     ++planner.state_.evaluations;
     if (!planner.evaluateCost(Eigen::Map<const Eigen::VectorXd>(raw, n), out))
     {
-        planner.state_.stop_reason = StopReason::Error;
+        planner.state_.stop = true;
         out.setZero();
         return 1e100;
     }
@@ -259,7 +259,7 @@ double Diff_Optimizer::costFunctionCallback(void *instance, const double *raw, d
 int Diff_Optimizer::progressCallback(void *instance,const double *,const double *,double,double,double,double,int,int,int)
 {
     auto &planner = *static_cast<Diff_Optimizer *>(instance);
-    return planner.state_.stop_reason != StopReason::None ? 1 : 0;
+    return planner.state_.stop ? 1 : 0;
 }
 
 bool Diff_Optimizer::evaluateCost(Eigen::Ref<const Eigen::VectorXd> variables,
@@ -564,4 +564,4 @@ int Diff_Optimizer::obstacleEnd() const
     const int last = state_.piece_count * param_.integration_intervals;
     return state_.input->touches_goal ? last : last - (last - 1) / 3;
 }
-} // namespace diff
+} // namespace traj_opt

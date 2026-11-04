@@ -1,0 +1,6 @@
+{
+  "search": {
+    "search_cells": 100,
+    "timeout_ms": 200
+  }
+}

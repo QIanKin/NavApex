@@ -23,7 +23,7 @@ enum class LogChannel { Diagnostic, Replay };
 struct LogConfig
 {
     std::string directory = "log";
-    std::string name = "planner";
+    std::string name = "navapex"; // 文件名：<name>.YYYYMMDD-HHMMSS.log
     std::string software_version = "0.1.0";
     std::string system_version = "unspecified";
     LogLevel level = LogLevel::Info;
@@ -57,6 +57,7 @@ bool logEnabled(LogLevel level, LogChannel channel = LogChannel::Diagnostic) noe
 /// 报告日志基础设施故障；兜底 stderr 每五秒最多一次，不递归使用日志。
 void reportLogFailure(const char *detail) noexcept;
 
+/// 本地时间 HH:MM:SS mmm(pid)级别/标签: 消息；每条自动换行，消息内换行转义。
 /// 自身构造、格式化、提交异常全部隔离；日志实参须为无副作用的数据表达式。
 class LogLine
 {

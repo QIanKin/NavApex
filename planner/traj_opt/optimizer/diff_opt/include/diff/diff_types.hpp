@@ -5,9 +5,9 @@
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
-namespace diff
+namespace traj_opt
 {
-struct Cost
+struct DiffCost
 {
     double smoothness = 0;
     double time = 0;
@@ -28,13 +28,7 @@ struct Cost
     }
 };
 
-enum class StopReason
-{
-    None,
-    Error
-};
-
-struct PlanningState
+struct DiffPlanningState
 {
     std::shared_ptr<const traj_opt::PlanInput> input;
 
@@ -43,9 +37,9 @@ struct PlanningState
     double swarm_weight = 0;
     int evaluations = 0;
 
-    StopReason stop_reason = StopReason::None;
-    Cost evaluation_cost;
+    bool stop = false;
+    DiffCost evaluation_cost;
     std::vector<double> min_swarm_dist_sq;
 };
 
-} // namespace diff
+} // namespace traj_opt
