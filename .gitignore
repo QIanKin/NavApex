@@ -5,3 +5,4 @@ test/
 tests/
 log/
 .vscode/
+!planner/traj_opt/optimizer/diff_opt/tests/

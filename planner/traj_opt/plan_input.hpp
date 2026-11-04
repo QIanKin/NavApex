@@ -3,6 +3,7 @@
 #include <Eigen/Core>
 #include <map/occupancy_map.hpp>
 #include <memory>
+#include <robot_model/robot_model.hpp>
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
@@ -27,7 +28,7 @@ struct NeighborTrajectory
     int robot_id = -1;
     double start_time = 0;
     double clearance = 0.15;
-    poly_traj::Trajectory trajectory;
+    poly_traj::Trajectory<3> trajectory;
 };
 
 struct PlanInput
@@ -38,6 +39,8 @@ struct PlanInput
     Eigen::VectorXd durations;
 
     std::shared_ptr<const map::OccupancyMap> map;
+    std::shared_ptr<const map::EsdfMap2D> esdf;                 // 2d专属
+    std::shared_ptr<const robot_model::RobotModel> robot_model; // 2d专属
     std::vector<NeighborTrajectory> neighbors;
     double start_time = 0;
     int robot_id = 0;

@@ -402,7 +402,7 @@ LogLine::~LogLine() noexcept
 
 namespace poly_traj
 {
-std::ostream &operator<<(std::ostream &stream, const Trajectory &value)
+std::ostream &operator<<(std::ostream &stream, const Trajectory<3> &value)
 {
     stream << "trajectory_version=1 pieces=" << value.getPieceNum()
            << " duration=" << value.getTotalDuration()

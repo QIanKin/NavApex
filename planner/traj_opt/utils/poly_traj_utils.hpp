@@ -14,14 +14,17 @@
 
 namespace poly_traj
 {
+    template <int Dim> using CoefficientMat = Eigen::Matrix<double, Dim, 6>;
+    template <int Dim> using VelCoefficientMat = Eigen::Matrix<double, Dim, 5>;
+    template <int Dim> using AccCoefficientMat = Eigen::Matrix<double, Dim, 4>;
 
-    // Polynomial order and trajectory dimension are fixed here
-    typedef Eigen::Matrix<double, 3, 6> CoefficientMat;
-    typedef Eigen::Matrix<double, 3, 5> VelCoefficientMat;
-    typedef Eigen::Matrix<double, 3, 4> AccCoefficientMat;
-
-    class Piece
+    template <int Dim> class Piece
     {
+        static_assert(Dim >= 1 && Dim <= 3, "Polynomial dimension must be 1, 2 or 3");
+        using Vector = Eigen::Matrix<double, Dim, 1>;
+        using CoefficientMat = poly_traj::CoefficientMat<Dim>;
+        using VelCoefficientMat = poly_traj::VelCoefficientMat<Dim>;
+        using AccCoefficientMat = poly_traj::AccCoefficientMat<Dim>;
     private:
         double duration;
         CoefficientMat coeffMat;
@@ -34,7 +37,7 @@ namespace poly_traj
 
         inline int getDim() const
         {
-            return 3;
+            return Dim;
         }
 
         inline int getOrder() const
@@ -64,9 +67,9 @@ namespace poly_traj
             return velCoeffMat;
         }
 
-        inline Eigen::Vector3d getPos(const double &t) const
+        inline Vector getPos(const double &t) const
         {
-            Eigen::Vector3d pos(0.0, 0.0, 0.0);
+            Vector pos = Vector::Zero();
             double tn = 1.0;
             for (int i = 5; i >= 0; i--)
             {
@@ -76,9 +79,9 @@ namespace poly_traj
             return pos;
         }
 
-        inline Eigen::Vector3d getVel(const double &t) const
+        inline Vector getVel(const double &t) const
         {
-            Eigen::Vector3d vel(0.0, 0.0, 0.0);
+            Vector vel = Vector::Zero();
             double tn = 1.0;
             int n = 1;
             for (int i = 4; i >= 0; i--)
@@ -90,9 +93,9 @@ namespace poly_traj
             return vel;
         }
 
-        inline Eigen::Vector3d getAcc(const double &t) const
+        inline Vector getAcc(const double &t) const
         {
-            Eigen::Vector3d acc(0.0, 0.0, 0.0);
+            Vector acc = Vector::Zero();
             double tn = 1.0;
             int m = 1;
             int n = 2;
@@ -106,9 +109,9 @@ namespace poly_traj
             return acc;
         }
 
-        inline Eigen::Vector3d getJer(const double &t) const
+        inline Vector getJer(const double &t) const
         {
-            Eigen::Vector3d jer(0.0, 0.0, 0.0);
+            Vector jer = Vector::Zero();
             double tn = 1.0;
             int l = 1;
             int m = 2;
@@ -172,9 +175,12 @@ namespace poly_traj
             Eigen::MatrixXd nVelCoeffMat = normalizeVelCoeffMat();
             //vx^2 + vy^2 + vz^2
             //1x9
-            Eigen::VectorXd coeff = RootFinder::polySqr(nVelCoeffMat.row(0)) +
-                                    RootFinder::polySqr(nVelCoeffMat.row(1)) +
-                                    RootFinder::polySqr(nVelCoeffMat.row(2));
+            Eigen::VectorXd coeff = Eigen::VectorXd::Zero(9);
+            for (int axis = 0; axis < Dim; ++axis)
+            {
+                coeff += RootFinder::polySqr(nVelCoeffMat.row(axis));
+            }
+                
 
             int N = coeff.size();
             int n = N - 1;
@@ -185,7 +191,7 @@ namespace poly_traj
             }
             if (coeff.head(N - 1).squaredNorm() < DBL_EPSILON)
             {
-                return 0.0;
+                return getVel(0.0).norm();
             }
             else
             {   
@@ -222,9 +228,12 @@ namespace poly_traj
         inline double getMaxAccRate() const
         {
             Eigen::MatrixXd nAccCoeffMat = normalizeAccCoeffMat();
-            Eigen::VectorXd coeff = RootFinder::polySqr(nAccCoeffMat.row(0)) +
-                                    RootFinder::polySqr(nAccCoeffMat.row(1)) +
-                                    RootFinder::polySqr(nAccCoeffMat.row(2));
+            Eigen::VectorXd coeff = Eigen::VectorXd::Zero(7);
+            for (int axis = 0; axis < Dim; ++axis)
+            {
+                coeff += RootFinder::polySqr(nAccCoeffMat.row(axis));
+            }
+                
             int N = coeff.size();
             int n = N - 1;
             for (int i = 0; i < N; i++)
@@ -234,7 +243,7 @@ namespace poly_traj
             }
             if (coeff.head(N - 1).squaredNorm() < DBL_EPSILON)
             {
-                return 0.0;
+                return getAcc(0.0).norm();
             }
             else
             {
@@ -280,9 +289,12 @@ namespace poly_traj
             {
                 Eigen::MatrixXd nVelCoeffMat = normalizeVelCoeffMat();
                 //1x9
-                Eigen::VectorXd coeff = RootFinder::polySqr(nVelCoeffMat.row(0)) +
-                                        RootFinder::polySqr(nVelCoeffMat.row(1)) +
-                                        RootFinder::polySqr(nVelCoeffMat.row(2));
+                Eigen::VectorXd coeff = Eigen::VectorXd::Zero(9);
+                for (int axis = 0; axis < Dim; ++axis)
+                {
+                    coeff += RootFinder::polySqr(nVelCoeffMat.row(axis));
+                }
+
                 double t2 = duration * duration;
                 coeff.tail<1>()(0) -= sqrMaxVelRate * t2;
                 return RootFinder::countRoots(coeff, 0.0, 1.0) == 0;
@@ -300,9 +312,12 @@ namespace poly_traj
             else
             {
                 Eigen::MatrixXd nAccCoeffMat = normalizeAccCoeffMat();
-                Eigen::VectorXd coeff = RootFinder::polySqr(nAccCoeffMat.row(0)) +
-                                        RootFinder::polySqr(nAccCoeffMat.row(1)) +
-                                        RootFinder::polySqr(nAccCoeffMat.row(2));
+                Eigen::VectorXd coeff = Eigen::VectorXd::Zero(7);
+                for (int axis = 0; axis < Dim; ++axis)
+                {
+                    coeff += RootFinder::polySqr(nAccCoeffMat.row(axis));
+                }
+                    
                 double t2 = duration * duration;
                 double t4 = t2 * t2;
                 coeff.tail<1>()(0) -= sqrMaxAccRate * t4;
@@ -310,8 +325,8 @@ namespace poly_traj
             }
         }
 
-        inline bool project_pt(const Eigen::Vector3d &pt,
-                               double &tt, Eigen::Vector3d &pro_pt)
+        inline bool project_pt(const Vector &pt,
+                               double &tt, Vector &pro_pt)
         {
             // (p - pt)^T * v
             auto l_coeff = getCoeffMat();
@@ -345,7 +360,7 @@ namespace poly_traj
                 { // velocity == 0, ignore it
                     continue;
                 }
-                Eigen::Vector3d p = getPos(root);
+                Vector p = getPos(root);
                 double distance = (p - pt).norm();
                 if (distance < min_dist || min_dist < 0)
                 {
@@ -357,9 +372,9 @@ namespace poly_traj
             return min_dist > 0;
         }
 
-        inline bool intersection_plane(const Eigen::Vector3d p,
-                                       const Eigen::Vector3d v,
-                                       double &tt, Eigen::Vector3d &pt) const
+        inline bool intersection_plane(const Vector p,
+                                       const Vector v,
+                                       double &tt, Vector &pt) const
         {
             auto coeff = getCoeffMat();
             coeff.col(5) = coeff.col(5) - p;
@@ -388,8 +403,13 @@ namespace poly_traj
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
     };
 
-    class Trajectory
+
+    template <int Dim> class Trajectory
     {
+        static_assert(Dim >= 1 && Dim <= 3, "Polynomial dimension must be 1, 2 or 3");
+        using Vector = Eigen::Matrix<double, Dim, 1>;
+        using Piece = poly_traj::Piece<Dim>;
+        using CoefficientMat = poly_traj::CoefficientMat<Dim>;
     private:
         typedef std::vector<Piece> Pieces;
         Pieces pieces;
@@ -438,7 +458,7 @@ namespace poly_traj
         inline Eigen::MatrixXd getPositions() const
         {
             int N = getPieceNum();
-            Eigen::MatrixXd positions(3, N + 1);
+            Eigen::MatrixXd positions(Dim, N + 1);
             for (int i = 0; i < N; i++)
             {
                 positions.col(i) = pieces[i].getCoeffMat().col(5);
@@ -463,22 +483,22 @@ namespace poly_traj
             return;
         }
 
-        inline Pieces::const_iterator begin() const
+        inline typename Pieces::const_iterator begin() const
         {
             return pieces.begin();
         }
 
-        inline Pieces::const_iterator end() const
+        inline typename Pieces::const_iterator end() const
         {
             return pieces.end();
         }
 
-        inline Pieces::iterator begin()
+        inline typename Pieces::iterator begin()
         {
             return pieces.begin();
         }
 
-        inline Pieces::iterator end()
+        inline typename Pieces::iterator end()
         {
             return pieces.end();
         }
@@ -528,31 +548,31 @@ namespace poly_traj
             return idx;
         }
 
-        inline Eigen::Vector3d getPos(double t) const
+        inline Vector getPos(double t) const
         {
             int pieceIdx = locatePieceIdx(t);
             return pieces[pieceIdx].getPos(t);
         }
 
-        inline Eigen::Vector3d getVel(double t) const
+        inline Vector getVel(double t) const
         {
             int pieceIdx = locatePieceIdx(t);
             return pieces[pieceIdx].getVel(t);
         }
 
-        inline Eigen::Vector3d getAcc(double t) const
+        inline Vector getAcc(double t) const
         {
             int pieceIdx = locatePieceIdx(t);
             return pieces[pieceIdx].getAcc(t);
         }
 
-        inline Eigen::Vector3d getJer(double t) const
+        inline Vector getJer(double t) const
         {
             int pieceIdx = locatePieceIdx(t);
             return pieces[pieceIdx].getJer(t);
         }
 
-        inline Eigen::Vector3d getJuncPos(int juncIdx) const
+        inline Vector getJuncPos(int juncIdx) const
         {
             if (juncIdx != getPieceNum())
             {
@@ -564,7 +584,7 @@ namespace poly_traj
             }
         }
 
-        inline Eigen::Vector3d getJuncVel(int juncIdx) const
+        inline Vector getJuncVel(int juncIdx) const
         {
             if (juncIdx != getPieceNum())
             {
@@ -576,7 +596,7 @@ namespace poly_traj
             }
         }
 
-        inline Eigen::Vector3d getJuncAcc(int juncIdx) const
+        inline Vector getJuncAcc(int juncIdx) const
         {
             if (juncIdx != getPieceNum())
             {
@@ -642,8 +662,8 @@ namespace poly_traj
             return pieces[i];
         }
 
-        inline bool project_pt(const Eigen::Vector3d &pt,
-                               int &ii, double &tt, Eigen::Vector3d &pro_pt)
+        inline bool project_pt(const Vector &pt,
+                               int &ii, double &tt, Vector &pro_pt)
         {
             bool find_project_pt = false;
             for (int i = 0; i < getPieceNum(); ++i)
@@ -664,9 +684,9 @@ namespace poly_traj
             }
             return find_project_pt;
         }
-        inline bool intersection_plane(const Eigen::Vector3d p,
-                                       const Eigen::Vector3d v,
-                                       int &ii, double &tt, Eigen::Vector3d &pt)
+        inline bool intersection_plane(const Vector p,
+                                       const Vector v,
+                                       int &ii, double &tt, Vector &pt)
         {
             for (int i = 0; i < getPieceNum(); ++i)
             {
@@ -680,9 +700,9 @@ namespace poly_traj
             return false;
         }
 
-        inline std::vector<Eigen::Vector3d> way_points()
+        inline std::vector<Vector> way_points()
         {
-            std::vector<Eigen::Vector3d> pts;
+            std::vector<Vector> pts;
             for (int i = 0; i < getPieceNum(); ++i)
             {
                 pts.push_back(pieces[i].getPos(0));
@@ -714,7 +734,7 @@ namespace poly_traj
             return idx_ratio;
         }
 
-        inline Eigen::Vector3d getPoswithIdxRatio(double t, std::pair<int, double> &idx_ratio) const
+        inline Vector getPoswithIdxRatio(double t, std::pair<int, double> &idx_ratio) const
         {
             idx_ratio = locatePieceIdxWithRatio(t);
             return pieces[idx_ratio.first].getPos(t);
@@ -722,6 +742,7 @@ namespace poly_traj
 
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
     };
+
 
     // The banded system class is used for solving
     // banded linear system Ax=b efficiently.
@@ -891,8 +912,11 @@ namespace poly_traj
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
     };
 
-    class MinJerkOpt
+    template <int Dim> class MinJerkOpt
     {
+        static_assert(Dim >= 1 && Dim <= 3, "MINCO dimension must be 1, 2 or 3");
+        using Vector = Eigen::Matrix<double, Dim, 1>;
+        using State = Eigen::Matrix<double, Dim, 3>;
     public:
         MinJerkOpt() = default;
         MinJerkOpt(const MinJerkOpt&) = delete;
@@ -914,8 +938,8 @@ namespace poly_traj
 
     private:
         int N;
-        Eigen::Matrix3d headPVA;
-        Eigen::Matrix3d tailPVA;
+        State headPVA;
+        State tailPVA;
         Eigen::VectorXd T1;
         BandedSystem A;
         Eigen::MatrixXd b;
@@ -970,9 +994,10 @@ namespace poly_traj
         template <typename EIGENVEC>
         inline void addPropCtoT(const Eigen::MatrixXd &adjGdC, EIGENVEC &gdT) const
         {
-            Eigen::MatrixXd B1(6, 3), B2(3, 3);
+            Eigen::Matrix<double, 6, Dim> B1;
+            Eigen::Matrix<double, 3, Dim> B2;
 
-            Eigen::RowVector3d negVel, negAcc, negJer, negSnp, negCrk;
+            Eigen::Matrix<double, 1, Dim> negVel, negAcc, negJer, negSnp, negCrk;
 
             for (int i = 0; i < N - 1; i++)
             {
@@ -994,7 +1019,7 @@ namespace poly_traj
 
                 B1 << negSnp, negCrk, negVel, negVel, negAcc, negJer;
 
-                gdT(i) += B1.cwiseProduct(adjGdC.block<6, 3>(6 * i + 3, 0)).sum();
+                gdT(i) += B1.cwiseProduct(adjGdC.template block<6, Dim>(6 * i + 3, 0)).sum();
             }
 
             negVel = -(b.row(6 * N - 5) +
@@ -1012,7 +1037,7 @@ namespace poly_traj
 
             B2 << negVel, negAcc, negJer;
 
-            gdT(N - 1) += B2.cwiseProduct(adjGdC.block<3, 3>(6 * N - 3, 0)).sum();
+            gdT(N - 1) += B2.cwiseProduct(adjGdC.template block<3, Dim>(6 * N - 3, 0)).sum();
 
             return;
         }
@@ -1043,23 +1068,23 @@ namespace poly_traj
             const double vmaxSqr = vmax * vmax;
             const double amaxSqr = amax * amax;
 
-            Eigen::Vector3d pos, vel, acc, jer;
+            Vector pos, vel, acc, jer;
             double step, alpha;
             double s1, s2, s3, s4, s5;
             Eigen::Matrix<double, 6, 1> beta0, beta1, beta2, beta3;
-            Eigen::Vector3d outerNormal;
+            Vector outerNormal;
             int K;
             double violaPos, violaVel, violaAcc;
             double violaPosPenaD, violaVelPenaD, violaAccPenaD;
             double violaPosPena, violaVelPena, violaAccPena;
-            Eigen::Matrix<double, 6, 3> gradViolaVc, gradViolaAc;
+            Eigen::Matrix<double, 6, Dim> gradViolaVc, gradViolaAc;
             double gradViolaVt, gradViolaAt;
             double omg;
 
             int innerLoop, idx;
             for (int i = 0; i < N; i++)
             {
-                const auto &c = b.block<6, 3>(i * 6, 0);
+                const auto &c = b.template block<6, Dim>(i * 6, 0);
                 step = T1(i) / cons(i);
                 s1 = 0.0;
                 innerLoop = cons(i) + 1;
@@ -1087,14 +1112,14 @@ namespace poly_traj
                     K = cfgHs[idx].cols();
                     for (int k = 0; k < K; k++)
                     {
-                        outerNormal = cfgHs[idx].col(k).head<3>();
-                        violaPos = outerNormal.dot(pos - cfgHs[idx].col(k).tail<3>());
+                        outerNormal = cfgHs[idx].col(k).head<Dim>();
+                        violaPos = outerNormal.dot(pos - cfgHs[idx].col(k).tail<Dim>());
                         if (violaPos > 0.0)
                         {
                             violaPosPenaD = violaPos * violaPos;
                             violaPosPena = violaPosPenaD * violaPos;
                             violaPosPenaD *= 3.0;
-                            gdC.block<6, 3>(i * 6, 0) += omg * step * ci(0) * violaPosPenaD * beta0 * outerNormal.transpose();
+                            gdC.template block<6, Dim>(i * 6, 0) += omg * step * ci(0) * violaPosPenaD * beta0 * outerNormal.transpose();
                             gdT(i) += omg * (ci(0) * violaPosPenaD * alpha * outerNormal.dot(vel) * step +
                                              ci(0) * violaPosPena / cons(i));
                             pena += omg * step * ci(0) * violaPosPena;
@@ -1108,7 +1133,7 @@ namespace poly_traj
                         violaVelPenaD *= 3.0;
                         gradViolaVc = 2.0 * beta1 * vel.transpose();
                         gradViolaVt = 2.0 * alpha * vel.transpose() * acc;
-                        gdC.block<6, 3>(i * 6, 0) += omg * step * ci(1) * violaVelPenaD * gradViolaVc;
+                        gdC.template block<6, Dim>(i * 6, 0) += omg * step * ci(1) * violaVelPenaD * gradViolaVc;
                         gdT(i) += omg * (ci(1) * violaVelPenaD * gradViolaVt * step +
                                          ci(1) * violaVelPena / cons(i));
                         pena += omg * step * ci(1) * violaVelPena;
@@ -1121,7 +1146,7 @@ namespace poly_traj
                         violaAccPenaD *= 3.0;
                         gradViolaAc = 2.0 * beta2 * acc.transpose();
                         gradViolaAt = 2.0 * alpha * acc.transpose() * jer;
-                        gdC.block<6, 3>(i * 6, 0) += omg * step * ci(2) * violaAccPenaD * gradViolaAc;
+                        gdC.template block<6, Dim>(i * 6, 0) += omg * step * ci(2) * violaAccPenaD * gradViolaAc;
                         gdT(i) += omg * (ci(2) * violaAccPenaD * gradViolaAt * step +
                                          ci(2) * violaAccPena / cons(i));
                         pena += omg * step * ci(2) * violaAccPena;
@@ -1136,8 +1161,8 @@ namespace poly_traj
         }
 
     public:
-        inline void reset(const Eigen::Matrix3d &headState,
-                          const Eigen::Matrix3d &tailState,
+        inline void reset(const State &headState,
+                          const State &tailState,
                           const int &pieceNum)
         {
             N = pieceNum;
@@ -1145,8 +1170,8 @@ namespace poly_traj
             tailPVA = tailState;
             T1.resize(N);
             A.create(6 * N, 6, 6);
-            b.resize(6 * N, 3);
-            gdC.resize(6 * N, 3);
+            b.resize(6 * N, Dim);
+            gdC.resize(6 * N, Dim);
             // gdT.resize(6 * N);
             return;
         }
@@ -1300,21 +1325,21 @@ namespace poly_traj
             return objective;
         }
 
-        inline Trajectory getTraj(void) const
+        inline Trajectory<Dim> getTraj(void) const
         {
-            Trajectory traj;
+            Trajectory<Dim> traj;
             traj.reserve(N);
             for (int i = 0; i < N; i++)
             {
-                traj.emplace_back(T1(i), b.block<6, 3>(6 * i, 0).transpose().rowwise().reverse());
+                traj.emplace_back(T1(i), b.template block<6, Dim>(6 * i, 0).transpose().rowwise().reverse());
             }
             return traj;
         }
 
         inline Eigen::MatrixXd getInitConstraintPoints(const int K) const
         {
-            Eigen::MatrixXd pts(3, N * K + 1);
-            Eigen::Vector3d pos;
+            Eigen::MatrixXd pts(Dim, N * K + 1);
+            Vector pos;
             Eigen::Matrix<double, 6, 1> beta0;
             double s1, s2, s3, s4, s5;
             double step;
@@ -1322,7 +1347,7 @@ namespace poly_traj
 
             for (int i = 0; i < N; ++i)
             {
-                const auto &c = b.block<6, 3>(i * 6, 0);
+                const auto &c = b.template block<6, Dim>(i * 6, 0);
                 step = T1(i) / K;
                 s1 = 0.0;
                 // innerLoop = K;

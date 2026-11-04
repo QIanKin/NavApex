@@ -9,7 +9,7 @@ class OptimizerParams;
 struct Result
 {
     bool success = false;
-    poly_traj::Trajectory trajectory;
+    poly_traj::Trajectory<3> trajectory;
     double total_cost = 0;
     double elapsed_ms = 0;
 };

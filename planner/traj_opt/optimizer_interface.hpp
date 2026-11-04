@@ -18,6 +18,7 @@ public:
     const OptimizerParams &param() const;
 
 private:
+    std::string type_;
     std::shared_ptr<const PlanInput> input_;
     std::unique_ptr<Optimizer> optimizer_;
 };

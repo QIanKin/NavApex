@@ -625,9 +625,9 @@ int Omni_3d_Optimizer::obstacleEnd() const
     return state_.input->touches_goal ? last : last - (last - 1) / 3;    // not fixed goal consider about 2/3 
 }
 
-bool Omni_3d_Optimizer::collectCollisionSegments(const poly_traj::Trajectory &trajectory,
-                                            const Eigen::Matrix3Xd &points, 
-                                            std::vector<std::pair<int, int>> &segments)
+bool Omni_3d_Optimizer::collectCollisionSegments(const poly_traj::Trajectory<3> &trajectory,
+                                                 const Eigen::Matrix3Xd &points, 
+                                                 std::vector<std::pair<int, int>> &segments)
 {
     segments.clear();
     const auto durations = trajectory.getDurations();

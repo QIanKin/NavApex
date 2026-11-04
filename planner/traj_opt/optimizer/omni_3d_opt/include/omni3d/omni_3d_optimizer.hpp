@@ -42,7 +42,7 @@ private:
                            Eigen::VectorXd &time_gradient, 
                            Eigen::Ref<Eigen::VectorXd> gradient);
 
-    bool collectCollisionSegments(const poly_traj::Trajectory &trajectory,
+    bool collectCollisionSegments(const poly_traj::Trajectory<3> &trajectory,
                                   const Eigen::Matrix3Xd &points, 
                                   std::vector<std::pair<int, int>> &segments);
         
@@ -68,7 +68,7 @@ private:
     traj_opt::Omni3DParams param_;
     PlanningState state_;
 
-    poly_traj::MinJerkOpt minco_;
+    poly_traj::MinJerkOpt<3> minco_;
     LocalAStar local_search_;
 };
 } // namespace omni3d

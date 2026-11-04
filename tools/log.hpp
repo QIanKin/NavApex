@@ -10,8 +10,8 @@
 
 namespace poly_traj
 {
-class Trajectory;
-std::ostream &operator<<(std::ostream &stream, const Trajectory &value);
+template <int Dim> class Trajectory;
+std::ostream &operator<<(std::ostream &stream, const Trajectory<3> &value);
 }
 
 namespace planner_tools
