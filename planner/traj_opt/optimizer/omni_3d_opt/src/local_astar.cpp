@@ -6,11 +6,11 @@
 #include <queue>
 #include <tools/log.hpp>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
-LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
+LocalSearchResult LocalAStar::search(const perception::OccupancyMap &map,
                                      Eigen::Vector3d start, 
                                      Eigen::Vector3d goal, 
                                      int cells, 
@@ -18,36 +18,41 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
                                      std::vector<Eigen::Vector3d> &path)
 {
     path.clear();
-    const auto begin = std::chrono::steady_clock::now();
-    const double resolution = map.resolution();
+    auto begin = std::chrono::steady_clock::now();
+    double resolution = map.resolution();
     if (cells < 5 || cells > 200 || !std::isfinite(timeout_ms) || timeout_ms <= 0 ||
         !start.allFinite() || !goal.allFinite())
     {
         LOGE(OPTIMIZER_TAG) << "invalid local search input";
         return LocalSearchResult::InitializationError;
     }
-    const Eigen::Vector3d center = (start + goal) * 0.5;
-    const auto indexOf = [&](const Eigen::Vector3d &p, Eigen::Vector3i &index)
+    Eigen::Vector3d center = (start + goal) * 0.5;
+    auto indexOf = [&](const Eigen::Vector3d &p, Eigen::Vector3i &index)
     {
-        const Eigen::Vector3d local = (p - center) / resolution;
+        Eigen::Vector3d local = (p - center) / resolution;
         if (!local.allFinite() || local.cwiseAbs().maxCoeff() > cells)
             return false;
         index = (local + Eigen::Vector3d::Constant(0.5)).cast<int>() +
             Eigen::Vector3i::Constant(cells / 2);
         return (index.array() >= 1).all() && (index.array() < cells - 1).all();
     };
-    const auto positionOf = [&](const Eigen::Vector3i &i) -> Eigen::Vector3d
+    auto positionOf = [&](const Eigen::Vector3i &i) -> Eigen::Vector3d
     {
         return center + (i - Eigen::Vector3i::Constant(cells / 2)).cast<double>() * resolution;
     };
+    auto occupied = [&](const Eigen::Vector3i &index)
+    {
+        Eigen::Vector3d position = positionOf(index);
+        return map.occupied({position.x(), position.y(), position.z()});
+    };
     Eigen::Vector3i first, last;
-    const auto adjust = [&](Eigen::Vector3d &p, const Eigen::Vector3d &other, Eigen::Vector3i &index)
+    auto adjust = [&](Eigen::Vector3d &p, const Eigen::Vector3d &other, Eigen::Vector3i &index)
     {
         if (!indexOf(p, index))
             return false;
-        while (map.occupied(positionOf(index)))
+        while (occupied(index))
         {
-            const Eigen::Vector3d delta = p - other;
+            Eigen::Vector3d delta = p - other;
             if (delta.norm() < 1e-9)
                 return false;
             p += delta.normalized() * resolution;
@@ -62,11 +67,11 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
                             << start.transpose() << " goal=" << goal.transpose();
         return LocalSearchResult::InitializationError;
     }
-    const auto address = [cells](const Eigen::Vector3i &i)
+    auto address = [cells](const Eigen::Vector3i &i)
     { return (i.x() * cells + i.y()) * cells + i.z(); };
-    const auto unpack = [cells](int id) -> Eigen::Vector3i
+    auto unpack = [cells](int id) -> Eigen::Vector3i
     { return {id / (cells * cells), (id / cells) % cells, id % cells}; };
-    const auto heuristic = [&](const Eigen::Vector3i &i)
+    auto heuristic = [&](const Eigen::Vector3i &i)
     {
         Eigen::Vector3i d = (last - i).cwiseAbs();
         int v[3] = {d.x(), d.y(), d.z()};
@@ -86,7 +91,7 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
         { return a.score > b.score || (a.score == b.score && a.id > b.id); }
     };
     std::priority_queue<Entry, std::vector<Entry>, Later> open;
-    const int first_id = address(first), last_id = address(last);
+    int first_id = address(first), last_id = address(last);
     nodes_[first_id] = {0, -1, generation_, false};
     open.push({heuristic(first), 0, first_id});
     while (!open.empty())
@@ -97,7 +102,7 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
             LOGD(OPTIMIZER_TAG) << "local search timeout timeout_ms=" << timeout_ms;
             return LocalSearchResult::SearchError;
         }
-        const auto entry = open.top();
+        auto entry = open.top();
         open.pop();
         auto &current = nodes_[entry.id];
         if (current.closed || entry.cost != current.cost)
@@ -110,23 +115,23 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
             return LocalSearchResult::Success;
         }
         current.closed = true;
-        const Eigen::Vector3i index = unpack(entry.id);
+        Eigen::Vector3i index = unpack(entry.id);
         for (int dx = -1; dx <= 1; ++dx)
             for (int dy = -1; dy <= 1; ++dy)
                 for (int dz = -1; dz <= 1; ++dz)
                 {
                     if ((dx == 0 && dy == 0 && dz == 0) ||
-                        (map.space() == map::Space::Planar && dz != 0))
+                        (map.space() == perception::Space::Planar && dz != 0))
                         continue;
-                    const Eigen::Vector3i next = index + Eigen::Vector3i(dx, dy, dz);
+                    Eigen::Vector3i next = index + Eigen::Vector3i(dx, dy, dz);
                     if ((next.array() < 1).any() || (next.array() >= cells - 1).any())
                         continue;
-                    const int id = address(next);
+                    int id = address(next);
                     auto &node = nodes_[id];
-                    const bool visited = node.generation == generation_;
-                    if ((visited && node.closed) || map.occupied(positionOf(next)))
+                    bool visited = node.generation == generation_;
+                    if ((visited && node.closed) || occupied(next))
                         continue;
-                    const double cost = current.cost + std::sqrt(dx * dx + dy * dy + dz * dz);
+                    double cost = current.cost + std::sqrt(dx * dx + dy * dy + dz * dz);
                     if (!visited || cost < node.cost)
                     {
                         node = {cost, entry.id, generation_, false};
@@ -137,4 +142,4 @@ LocalSearchResult LocalAStar::search(const map::OccupancyMap &map,
     LOGD(OPTIMIZER_TAG) << "local search no path";
     return LocalSearchResult::SearchError;
 }
-} // namespace traj_opt
+} // namespace navapex::traj_opt

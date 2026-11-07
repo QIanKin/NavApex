@@ -20,7 +20,7 @@
 #include <unistd.h>
 #include <utils/poly_traj_utils.hpp>
 
-namespace planner_tools
+namespace navapex::planner_tools
 {
 namespace
 {
@@ -41,7 +41,7 @@ std::int64_t epochNanoseconds() noexcept
 void emergency(const char *detail) noexcept
 {
     static std::atomic<std::int64_t> next{0};
-    const auto now = std::chrono::duration_cast<std::chrono::seconds>(
+    auto now = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     auto expected = next.load();
     if (now < expected || !next.compare_exchange_strong(expected, now + 5))
@@ -82,16 +82,16 @@ std::string createLogPath(const std::filesystem::path &directory, const std::str
 {
     for (std::size_t index = 0; ; ++index)
     {
-        const auto suffix = index == 0 ? "" : "." + std::to_string(index);
-        const auto path = (directory / (stem + suffix + ".log")).string();
+        auto suffix = index == 0 ? "" : "." + std::to_string(index);
+        auto path = (directory / (stem + suffix + ".log")).string();
         // 同一秒内多次启动时加序号；独占创建，避免覆盖已有日志。
-        const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
+        int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666);
         if (descriptor >= 0)
         {
             (void)::close(descriptor);
             return path;
         }
-        const int error = errno;
+        int error = errno;
         if (error != EEXIST)
             throw std::system_error(error, std::generic_category(), "Cannot create log file: " + path);
     }
@@ -125,8 +125,8 @@ public:
             std::ostringstream line;
             line.imbue(std::locale::classic());
             // 显示时间与回放时间使用同一个采集时间戳。
-            const std::time_t seconds = timestamp / 1000000000;
-            const auto milliseconds = timestamp / 1000000 % 1000;
+            std::time_t seconds = timestamp / 1000000000;
+            auto milliseconds = timestamp / 1000000 % 1000;
             std::tm local{};
             localtime_r(&seconds, &local);
             line << std::put_time(&local, "%H:%M:%S") << ' '
@@ -142,7 +142,7 @@ public:
                      << " function=" << std::quoted(singleLine(message.function())) << " | ";
             }
             line << singleLine(message.message()) << '\n';
-            const auto record = line.str();
+            auto record = line.str();
             if (file_bytes_ > header_.size() && file_bytes_ + record.size() > config_.max_file_bytes)
                 rotate();
             file_ << record;
@@ -151,7 +151,7 @@ public:
             file_bytes_ += record.size();
             if (config_.console)
                 (void)::write(STDERR_FILENO, record.data(), record.size());
-            const auto now = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
             if (++unflushed_ >= config_.flush_every || message.level() == "ERROR" ||
                 now - last_flush_ >= std::chrono::milliseconds(250))
                 flush();
@@ -205,7 +205,7 @@ private:
             std::filesystem::remove(path_ + "." + std::to_string(config_.max_files - 1));
             for (std::size_t i = config_.max_files - 1; i > 1; --i)
             {
-                const auto previous = path_ + "." + std::to_string(i - 1);
+                auto previous = path_ + "." + std::to_string(i - 1);
                 if (std::filesystem::exists(previous))
                     std::filesystem::rename(previous, path_ + "." + std::to_string(i));
             }
@@ -256,8 +256,8 @@ public:
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!worker_) initializeLocked(config_);
-        const auto sequence = ++sequence_; // 丢弃也占序号，便于发现记录缺口
-        const std::size_t bytes = text.size() + tag.size();
+        auto sequence = ++sequence_; // 丢弃也占序号，便于发现记录缺口
+        std::size_t bytes = text.size() + tag.size();
         if (bytes > config_.max_record_bytes ||
             counters.pending.load() >= config_.max_pending_records ||
             bytes > config_.max_pending_bytes - counters.pending_bytes.load())
@@ -308,17 +308,17 @@ private:
             config.max_record_bytes == 0 || config.max_record_bytes > config.max_pending_bytes ||
             config.flush_every == 0)
             throw std::invalid_argument("Invalid planner log configuration");
-        const auto directory = std::filesystem::absolute(config.directory);
+        auto directory = std::filesystem::absolute(config.directory);
         std::filesystem::create_directories(directory);
-        const auto timestamp = epochNanoseconds();
-        const auto session = std::to_string(timestamp) + "-" + std::to_string(getpid());
-        const std::time_t seconds = timestamp / 1000000000;
+        auto timestamp = epochNanoseconds();
+        auto session = std::to_string(timestamp) + "-" + std::to_string(getpid());
+        std::time_t seconds = timestamp / 1000000000;
         std::tm local{};
         localtime_r(&seconds, &local);
         std::ostringstream name;
         name.imbue(std::locale::classic());
         name << config.name << '.' << std::put_time(&local, "%Y%m%d-%H%M%S");
-        const auto path = createLogPath(directory, name.str());
+        auto path = createLogPath(directory, name.str());
         auto worker = g3::LogWorker::createLogWorker();
         auto sink = worker->addSink(std::make_unique<FileSink>(path, config, session), &FileSink::receive);
         config_ = config;
@@ -433,9 +433,9 @@ LogLine::~LogLine() noexcept
     }
 }
 
-} // namespace planner_tools
+} // namespace navapex::planner_tools
 
-namespace poly_traj
+namespace navapex::poly_traj
 {
 std::ostream &operator<<(std::ostream &stream, const Trajectory<3> &value)
 {
@@ -459,4 +459,4 @@ std::ostream &operator<<(std::ostream &stream, const Trajectory<3> &value)
     }
     return stream;
 }
-} // namespace poly_traj
+} // namespace navapex::poly_traj

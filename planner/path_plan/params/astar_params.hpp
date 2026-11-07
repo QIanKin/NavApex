@@ -2,18 +2,16 @@
 
 #include "base_params.hpp"
 
-namespace path_plan
+namespace navapex::path_plan
 {
 class AStarParams : public SearcherParams
 {
 public:
-    AStarParams() = default;
+    explicit AStarParams(const std::string &path = {}) : SearcherParams(path) { read(); }
 
-    explicit AStarParams(const std::string &path)
+    void read() override
     {
-        const auto json = readJson(path);
-        readCommon(json);
-        validate();
+        readBase();
     }
 };
-} // namespace path_plan
+} // namespace navapex::path_plan

@@ -4,11 +4,10 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <tools/log.hpp>
 #include <utils/lbfgs.hpp>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
@@ -44,10 +43,15 @@ double timeDerivative(double x)
     return x > 0 ? x + 1 : (1 - x) / (d * d);
 }
 
-void neighborState(const traj_opt::NeighborTrajectory &n, double t, Eigen::Vector3d &p, Eigen::Vector3d &v)
+void neighborState(const NeighborTrajectory &n, double t, Eigen::Vector3d &p, Eigen::Vector3d &v)
 {
-    const double duration = n.trajectory.getTotalDuration();
-    if (t <= duration)
+    double duration = n.trajectory.getTotalDuration();
+    if (t < 0)
+    {
+        p = n.trajectory.getPos(0);
+        v.setZero();
+    }
+    else if (t <= duration)
     {
         p = n.trajectory.getPos(t);
         v = n.trajectory.getVel(t);
@@ -70,20 +74,22 @@ bool intersectGuide(const std::vector<Eigen::Vector3d> &path,
                     const Eigen::Vector3d &tangent, 
                     Eigen::Vector3d &intersection)
 {
-    if (path.size() < 2 || tangent.squaredNorm() < 1e-16) return false;
+    if (path.size() < 2 || tangent.squaredNorm() < 1e-16) 
+        return false;
+    
     int index = static_cast<int>(path.size() / 2);
     double value = (path[index] - point).dot(tangent);
-    const double initial = value;
+    double initial = value;
     for (std::size_t count = 0; count < path.size(); ++count)
     {
-        const int previous = index;
+        int previous = index;
         index += value >= 0 ? 1 : -1;
         if (index < 0 || index >= static_cast<int>(path.size())) break;
         value = (path[index] - point).dot(tangent);
         if (value * initial <= 0 && (value != 0 || initial != 0))
         {
-            const Eigen::Vector3d delta = path[index] - path[previous];
-            const double denominator = tangent.dot(delta);
+            Eigen::Vector3d delta = path[index] - path[previous];
+            double denominator = tangent.dot(delta);
             if (std::abs(denominator) < 1e-12) return false;
             intersection = path[index] + delta * tangent.dot(point - path[index]) / denominator;
             return intersection.allFinite();
@@ -95,58 +101,61 @@ bool intersectGuide(const std::vector<Eigen::Vector3d> &path,
 void removeSegmentOverlap(std::vector<std::pair<int, int>> &segments)
 {
     for (std::size_t i = 1; i < segments.size(); ++i)
+    {
         if (segments[i - 1].second >= segments[i].first)
         {
-            const double middle = (segments[i - 1].second + segments[i].first) / 2.0;
+            double middle = (segments[i - 1].second + segments[i].first) / 2.0;
             segments[i - 1].second = static_cast<int>(middle - 0.1);
             segments[i].first = static_cast<int>(middle + 1.1);
         }
+    }
 }
 
 } // namespace
 
 
-Omni_3d_Optimizer::Omni_3d_Optimizer(traj_opt::Omni3DParams c,
-                           std::shared_ptr<const traj_opt::PlanInput> input) : param_(std::move(c))
+Omni_3d_Optimizer::Omni_3d_Optimizer(Omni3DParams c,
+                                     std::shared_ptr<const OptimizerInput> input) 
+                                     : param_(std::move(c))
 {
     state_.input = std::move(input);
     LOGD(OPTIMIZER_TAG) << "create omni_3d_optimizer success";
 }
 
-const traj_opt::Omni3DParams &Omni_3d_Optimizer::param() const
+const Omni3DParams &Omni_3d_Optimizer::param() const
 {
     return param_;
 }
 
-traj_opt::Result Omni_3d_Optimizer::optimize()
+OptimizerResult Omni_3d_Optimizer::optimize()
 {
-    const auto start = std::chrono::steady_clock::now();
-    traj_opt::Result result;
+    auto start = std::chrono::steady_clock::now();
+    OptimizerResult result;
     LOGD(OPTIMIZER_TAG) << "optimize start robot_id=" << state_.input->robot_id;
+
     if (initializePlanning() && runOptimization())
     {
-        result.total_cost = state_.evaluation_cost.total();
         result.trajectory = minco_.getTraj();
-        result.elapsed_ms = elapsedMs(start);
         result.success = true;
         LOGI(OPTIMIZER_TAG) << "optimize success robot_id=" << state_.input->robot_id
-                            << " elapsed_ms=" << result.elapsed_ms;
+                            << " cost=" << state_.evaluation_cost.total()
+                            << " elapsed_ms=" << elapsedMs(start);
         LOG_TRAJECTORY(OPTIMIZER_TAG) << "trajectory robot_id=" << state_.input->robot_id
                                       << " start_time=" << state_.input->start_time << ' '
                                       << result.trajectory;
     }
+    else
+        LOGW(OPTIMIZER_TAG) << "optimize failed robot_id=" << state_.input->robot_id
+                            << " elapsed_ms=" << elapsedMs(start);
     return result;
 }
 
 bool Omni_3d_Optimizer::initializePlanning()
 {   
-    state_.swarm_weight = param_.weights.swarm;
+    state_.swarm_weight = param_.weight_swarm;
     state_.rebounds = 0;
-    state_.evaluations = 0;
-    state_.stop_reason = StopReason::None;
-    state_.evaluation_cost = {};
     state_.piece_count = static_cast<int>(state_.input->durations.size());
-    state_.min_swarm_dist_sq.assign(state_.input->neighbors.size(), std::numeric_limits<double>::infinity());
+    state_.min_swarm_dist_sq.resize(state_.input->neighbors.size());
     state_.sample_points.resize(3, state_.piece_count * param_.integration_intervals + 1);
     state_.normal_planes.clear();
 
@@ -160,7 +169,7 @@ bool Omni_3d_Optimizer::initializePlanning()
     }
 
     // 1.2 初始化法平面
-    const auto initial = minco_.getTraj();
+    auto initial = minco_.getTraj();
     state_.normal_planes.reserve(state_.input->inner_points.cols());
     Eigen::Matrix3Xd guide(3, state_.input->inner_points.cols() + 2);
     guide.col(0) = state_.input->start.position;
@@ -201,9 +210,9 @@ bool Omni_3d_Optimizer::initializePlanning()
         constraints.clear();
     }
     state_.obstacle_constraints.resize(state_.sample_points.cols());
-    const auto points = minco_.getInitConstraintPoints(param_.integration_intervals);
+    auto points = minco_.getInitConstraintPoints(param_.integration_intervals);
     std::vector<std::pair<int, int>> initial_segments;
-    if (!collectCollisionSegments(initial, points, initial_segments))  //计算碰撞区间
+    if (!collectCollisionSegments(initial, points, initial_segments, checkEnd()))
         return false;
     if (!finelyBuildObstacleConstraints(points, std::move(initial_segments))) //A*构造障碍物边界约束
         return false;
@@ -224,13 +233,25 @@ bool Omni_3d_Optimizer::runOptimization()
         // 2.2 迭代求解lbfgs
         if (!solveLbfgs(variables))
             return false;
-        
+        LOGD(OPTIMIZER_TAG) << "solver cost"
+                            << " attempts=" << attempt + 1
+                            << " total=" << state_.evaluation_cost.total()
+                            << " smoothness=" << state_.evaluation_cost.smoothness
+                            << " time=" << state_.evaluation_cost.time
+                            << " obstacle=" << state_.evaluation_cost.obstacle
+                            << " obstacle_soft=" << state_.evaluation_cost.obstacle_soft
+                            << " velocity=" << state_.evaluation_cost.velocity
+                            << " acceleration=" << state_.evaluation_cost.acceleration
+                            << " jerk=" << state_.evaluation_cost.jerk
+                            << " spacing=" << state_.evaluation_cost.spacing
+                            << " swarm=" << state_.evaluation_cost.swarm;
+
         // 2.3 优化结束检查轨迹
         bool swarm_safe = true;
         for (std::size_t i = 0; i < state_.input->neighbors.size(); ++i)
         {
             const auto &neighbor = state_.input->neighbors[i];
-            const double clearance = param_.swarm.validation_scale * (param_.swarm.clearance + neighbor.clearance);
+            double clearance = param_.swarm_validation_scale * (param_.swarm_clearance + neighbor.clearance);
             if (state_.min_swarm_dist_sq[i] < clearance * clearance)
             {
                 LOGW(OPTIMIZER_TAG) << "swarm collision robot_id=" << neighbor.robot_id;
@@ -242,18 +263,6 @@ bool Omni_3d_Optimizer::runOptimization()
             state_.swarm_weight *= 2;
         else if (CheckTrajectory())     // check dynamic feasible and static collision
         {
-            LOGD(OPTIMIZER_TAG) << "solver cost"
-                                << " attempts=" << attempt + 1
-                                << " total=" << state_.evaluation_cost.total()
-                                << " smoothness=" << state_.evaluation_cost.smoothness
-                                << " time=" << state_.evaluation_cost.time
-                                << " obstacle=" << state_.evaluation_cost.obstacle
-                                << " obstacle_soft=" << state_.evaluation_cost.obstacle_soft
-                                << " velocity=" << state_.evaluation_cost.velocity
-                                << " acceleration=" << state_.evaluation_cost.acceleration
-                                << " jerk=" << state_.evaluation_cost.jerk
-                                << " spacing=" << state_.evaluation_cost.spacing
-                                << " swarm=" << state_.evaluation_cost.swarm;
             return true;
         }
 
@@ -268,28 +277,27 @@ bool Omni_3d_Optimizer::runOptimization()
 // 调用lbfgs求解
 bool Omni_3d_Optimizer::solveLbfgs(Eigen::VectorXd &variables)
 {
-    const auto &config = param_.solver;
     planner_lbfgs::lbfgs_parameter_t p;
     planner_lbfgs::lbfgs_load_default_parameters(&p);
-    p.mem_size = config.mem_size;
-    p.max_iterations = config.max_iterations;
-    p.past = config.past;
-    p.max_linesearch = config.max_linesearch;
-    p.g_epsilon = config.g_epsilon;
-    p.delta = config.delta;
-    p.min_step = config.min_step;
-    p.max_step = config.max_step;
-    p.f_dec_coeff = config.f_dec_coeff;
-    p.s_curv_coeff = config.s_curv_coeff;
-    p.xtol = config.xtol;
-    p.abs_curv_cond = config.abs_curv_cond;
+    p.mem_size = param_.solver_mem_size;
+    p.max_iterations = param_.solver_max_iterations;
+    p.past = param_.solver_past;
+    p.max_linesearch = param_.solver_max_linesearch;
+    p.g_epsilon = param_.solver_g_epsilon;
+    p.delta = param_.solver_delta;
+    p.min_step = param_.solver_min_step;
+    p.max_step = param_.solver_max_step;
+    p.f_dec_coeff = param_.solver_f_dec_coeff;
+    p.s_curv_coeff = param_.solver_s_curv_coeff;
+    p.xtol = param_.solver_xtol;
+    p.abs_curv_cond = param_.solver_abs_curv_cond;
     for (;;)
     {
         state_.stop_reason = StopReason::None;
         state_.evaluations = 0;
-        const int code = planner_lbfgs::lbfgs_optimize(variables.size(), variables.data(), nullptr,
-                                                       costFunctionCallback, nullptr,
-                                                       progressCallback, this, &p);
+        int code = planner_lbfgs::lbfgs_optimize(variables.size(), variables.data(), nullptr,
+                                                 costFunctionCallback, nullptr,
+                                                 progressCallback, this, &p);
         if (state_.stop_reason == StopReason::Error)
         {
             LOGW(OPTIMIZER_TAG) << "solver error stop";
@@ -307,10 +315,10 @@ bool Omni_3d_Optimizer::solveLbfgs(Eigen::VectorXd &variables)
             LOGD(OPTIMIZER_TAG) << "solver rebound count " << state_.rebounds;
             continue;
         }
-        const bool accepted = code == planner_lbfgs::LBFGS_CONVERGENCE || 
-                              code == planner_lbfgs::LBFGSERR_MAXIMUMITERATION ||
-                              code == planner_lbfgs::LBFGS_ALREADY_MINIMIZED || 
-                              code == planner_lbfgs::LBFGS_STOP;
+        bool accepted = code == planner_lbfgs::LBFGS_CONVERGENCE || 
+                        code == planner_lbfgs::LBFGSERR_MAXIMUMITERATION ||
+                        code == planner_lbfgs::LBFGS_ALREADY_MINIMIZED || 
+                        code == planner_lbfgs::LBFGS_STOP;
         if (!accepted){
             LOGW(OPTIMIZER_TAG) << "solver_failed code=" << code
                                 << " reason=" << planner_lbfgs::lbfgs_strerror(code);
@@ -346,7 +354,7 @@ int Omni_3d_Optimizer::progressCallback(void *instance,const double *,const doub
 }
 
 bool Omni_3d_Optimizer::evaluateCost(Eigen::Ref<const Eigen::VectorXd> variables, 
-                                Eigen::Ref<Eigen::VectorXd> gradient)
+                                     Eigen::Ref<Eigen::VectorXd> gradient)
 {
     state_.evaluation_cost = {};
     std::fill(state_.min_swarm_dist_sq.begin(), state_.min_swarm_dist_sq.end(), 
@@ -364,7 +372,7 @@ bool Omni_3d_Optimizer::evaluateCost(Eigen::Ref<const Eigen::VectorXd> variables
     addJerkCost(time_gradient);                                                // jerk 代价函数
     addPenaltyCosts(time_gradient);                                            // 时间积分罚函数
     addSpacingCost(time_gradient);                                             // 间距惩罚函数
-    state_.evaluation_cost.time = param_.weights.time * minco_.get_T1().sum(); // 时间项函数
+    state_.evaluation_cost.time = param_.weight_time * minco_.get_T1().sum();  // 时间项函数
     propagateGradient(variables, time_gradient, gradient);                     // 回传梯度
 
     if (!std::isfinite(state_.evaluation_cost.total()) || !gradient.allFinite())
@@ -395,41 +403,41 @@ bool Omni_3d_Optimizer::decodeVariables(Eigen::Ref<const Eigen::VectorXd> variab
 void Omni_3d_Optimizer::addJerkCost(Eigen::VectorXd &time_gradient)
 {
     minco_.initGradCost(time_gradient, state_.evaluation_cost.smoothness);
-    state_.evaluation_cost.smoothness *= param_.weights.smoothness;
-    minco_.get_gdC() *= param_.weights.smoothness;
-    time_gradient *= param_.weights.smoothness;
+    state_.evaluation_cost.smoothness *= param_.weight_smoothness;
+    minco_.get_gdC() *= param_.weight_smoothness;
+    time_gradient *= param_.weight_smoothness;
 }
 
 void Omni_3d_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
 {
     const auto &coefficients = minco_.get_b();
-    const int K = param_.integration_intervals;
-    const int obs_end = obstacleEnd();
-    const Eigen::Vector3d metric(1 / std::pow(param_.swarm.horizontal_scale, 2),
-                                 1 / std::pow(param_.swarm.horizontal_scale, 2),
-                                 1 / std::pow(param_.swarm.vertical_scale, 2));
+    int K = param_.integration_intervals;
+    int check_end = checkEnd();
+    Eigen::Vector3d metric(1 / std::pow(param_.swarm_horizontal_scale, 2),
+                           1 / std::pow(param_.swarm_horizontal_scale, 2),
+                           1 / std::pow(param_.swarm_vertical_scale,   2));
     double elapsed = 0;
 
     for (int i = 0; i < state_.piece_count; ++i)
     {
-        const auto c = coefficients.block<6, 3>(6 * i, 0);
-        const double h = minco_.get_T1()[i] / K;
+        auto c = coefficients.block<6, 3>(6 * i, 0);
+        double h = minco_.get_T1()[i] / K;
         for (int j = 0; j <= K; ++j)
         {
-            const double alpha = double(j) / K;
-            const double t = alpha * minco_.get_T1()[i];
-            const double w = (j == 0 || j == K) ? 0.5 : 1.0;
+            double alpha = double(j) / K;
+            double t = alpha * minco_.get_T1()[i];
+            double w = (j == 0 || j == K) ? 0.5 : 1.0;
 
-            const auto b0 = basis(t);
-            const auto b1 = basis(t, 1);
-            const auto b2 = basis(t, 2);
-            const auto b3 = basis(t, 3);
+            auto b0 = basis(t);
+            auto b1 = basis(t, 1);
+            auto b2 = basis(t, 2);
+            auto b3 = basis(t, 3);
             
-            const Eigen::Vector3d p = c.transpose() * b0;
-            const Eigen::Vector3d v = c.transpose() * b1;
-            const Eigen::Vector3d a = c.transpose() * b2;
-            const Eigen::Vector3d jer = c.transpose() * b3;
-            const Eigen::Vector3d snap = c.transpose() * basis(t, 4);
+            Eigen::Vector3d p = c.transpose() * b0;
+            Eigen::Vector3d v = c.transpose() * b1;
+            Eigen::Vector3d a = c.transpose() * b2;
+            Eigen::Vector3d jer = c.transpose() * b3;
+            Eigen::Vector3d snap = c.transpose() * basis(t, 4);
             
             state_.sample_points.col(i * K + j) = p;
             Eigen::Vector3d gp = Eigen::Vector3d::Zero();
@@ -440,34 +448,34 @@ void Omni_3d_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
             double explicit_time = 0;
 
             //静态避障
-            if (i * K + j > 0 && i * K + j <= obs_end)
+            if (i * K + j > 0 && i * K + j <= check_end)
             {
                 for (const auto &constraint : state_.obstacle_constraints[i * K + j])
                 {
-                    const double projection = (p - constraint.base).dot(constraint.direction);
-                    const double hard = param_.collision.clearance - projection;
-                    const double soft = param_.collision.soft_clearance - projection;
+                    double projection = (p - constraint.base).dot(constraint.direction);
+                    double hard = param_.collision_clearance - projection;
+                    double soft = param_.collision_soft_clearance - projection;
                     if (hard > 0)
                     {
-                        const double f = param_.weights.obstacle * hard * hard * hard;
+                        double f = param_.weight_obstacle * hard * hard * hard;
                         state_.evaluation_cost.obstacle += w * h * f;
                         integrand += f;
-                        gp -= 3 * param_.weights.obstacle * hard * hard * constraint.direction;
+                        gp -= 3 * param_.weight_obstacle * hard * hard * constraint.direction;
                     }
                     if (soft > 0)
                     {
-                        const double r = param_.collision.soft_scale;
-                        const double q = std::sqrt(1 + soft * soft / (r * r));
-                        const double f = param_.weights.obstacle_soft * r * r * (q - 1);
+                        double r = param_.collision_soft_scale;
+                        double q = std::sqrt(1 + soft * soft / (r * r));
+                        double f = param_.weight_obstacle_soft * r * r * (q - 1);
                         state_.evaluation_cost.obstacle_soft += w * h * f;
                         integrand += f;
-                        gp -= param_.weights.obstacle_soft * soft / q * constraint.direction;
+                        gp -= param_.weight_obstacle_soft * soft / q * constraint.direction;
                     }
                 }
             }
 
             //集群避障
-            if (i * K + j > 0 && i * K + j <= obs_end)
+            if (i * K + j > 0 && i * K + j <= check_end)
             {
                 for(std::size_t neighbor_index = 0; neighbor_index < state_.input->neighbors.size(); ++neighbor_index)
                 {
@@ -478,20 +486,20 @@ void Omni_3d_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
                     Eigen::Vector3d np;
                     Eigen::Vector3d nv;
                     neighborState(n, (state_.input->start_time - n.start_time) + elapsed + t, np, nv);
-                    const Eigen::Vector3d diff = p - np;
-                    const double safe = param_.swarm.penalty_scale * (param_.swarm.clearance + n.clearance);
-                    const double distance_squared = diff.dot(metric.cwiseProduct(diff));
+                    Eigen::Vector3d diff = p - np;
+                    double safe = param_.swarm_penalty_scale * (param_.swarm_clearance + n.clearance);
+                    double distance_squared = diff.dot(metric.cwiseProduct(diff));
                     state_.min_swarm_dist_sq[neighbor_index] = std::min(state_.min_swarm_dist_sq[neighbor_index], distance_squared);
-                    const double violation = safe * safe - distance_squared;
+                    double violation = safe * safe - distance_squared;
                     if (violation > 0)
                     {
-                        const double f = state_.swarm_weight * violation * violation * violation;
-                        const Eigen::Vector3d g = -6 * state_.swarm_weight * violation * violation *
-                                                  metric.cwiseProduct(diff);
+                        double f = state_.swarm_weight * violation * violation * violation;
+                        Eigen::Vector3d g = -6 * state_.swarm_weight * violation * violation *
+                                            metric.cwiseProduct(diff);
                         state_.evaluation_cost.swarm += w * h * f;
                         integrand += f;
                         gp += g;
-                        const double previous = -g.dot(nv);
+                        double previous = -g.dot(nv);
                         explicit_time += previous;
                         if (i > 0)
                             time_gradient.head(i).array() += w * h * previous;
@@ -502,18 +510,18 @@ void Omni_3d_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
             //运动可行性
             auto feasibility = [&](const Eigen::Vector3d &value, double limit, Eigen::Vector3d &g, double &part)
             {
-                const double violation = value.squaredNorm() - limit * limit;
+                double violation = value.squaredNorm() - limit * limit;
                 if (violation > 0)
                 {
-                    double f = param_.weights.feasibility * violation * violation * violation;
-                    g = 6 * param_.weights.feasibility * violation * violation * value;
+                    double f = param_.weight_feasibility * violation * violation * violation;
+                    g = 6 * param_.weight_feasibility * violation * violation * value;
                     part += w * h * f;
                     integrand += f;
                 }
             };
-            feasibility(v, param_.limits.velocity, gv, state_.evaluation_cost.velocity);
-            feasibility(a, param_.limits.acceleration, ga, state_.evaluation_cost.acceleration);
-            feasibility(jer, param_.limits.jerk, gj, state_.evaluation_cost.jerk);
+            feasibility(v, param_.max_velocity, gv, state_.evaluation_cost.velocity);
+            feasibility(a, param_.max_acceleration, ga, state_.evaluation_cost.acceleration);
+            feasibility(jer, param_.max_jerk, gj, state_.evaluation_cost.jerk);
 
             minco_.get_gdC().block<6, 3>(6 * i, 0) += w * h *
                 (b0 * gp.transpose() + b1 * gv.transpose() + b2 * ga.transpose() + b3 * gj.transpose());
@@ -527,15 +535,15 @@ void Omni_3d_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
 void Omni_3d_Optimizer::addSpacingCost(Eigen::VectorXd &time_gradient)
 {
     const auto &coefficients = minco_.get_b();
-    const int K = param_.integration_intervals;
+    int K = param_.integration_intervals;
     Eigen::Matrix3Xd sample_gradient = Eigen::Matrix3Xd::Zero(3, state_.sample_points.cols());
-    const int edges = state_.sample_points.cols() - 1;
+    int edges = state_.sample_points.cols() - 1;
     for (int k = 0; k < edges; ++k)
     {
-        const Eigen::Vector3d d = state_.sample_points.col(k + 1) - state_.sample_points.col(k);
-        const double d2 = d.squaredNorm();
-        state_.evaluation_cost.spacing += param_.weights.sqrvariance * d2 * d2 / edges;
-        const Eigen::Vector3d g = 4 * param_.weights.sqrvariance * d2 / edges * d;
+        Eigen::Vector3d d = state_.sample_points.col(k + 1) - state_.sample_points.col(k);
+        double d2 = d.squaredNorm();
+        state_.evaluation_cost.spacing += param_.weight_sqrvariance * d2 * d2 / edges;
+        Eigen::Vector3d g = 4 * param_.weight_sqrvariance * d2 / edges * d;
         sample_gradient.col(k) -= g;
         sample_gradient.col(k + 1) += g;
     }
@@ -555,8 +563,8 @@ void Omni_3d_Optimizer::addSpacingCost(Eigen::VectorXd &time_gradient)
 }
 
 void Omni_3d_Optimizer::propagateGradient(Eigen::Ref<const Eigen::VectorXd> variables,
-                                     Eigen::VectorXd &time_gradient, 
-                                     Eigen::Ref<Eigen::VectorXd> gradient)
+                                          Eigen::VectorXd &time_gradient, 
+                                          Eigen::Ref<Eigen::VectorXd> gradient)
 {
     Eigen::Matrix3Xd point_gradient(3, state_.piece_count - 1);
     minco_.getGrad2TP(time_gradient, point_gradient);
@@ -564,20 +572,23 @@ void Omni_3d_Optimizer::propagateGradient(Eigen::Ref<const Eigen::VectorXd> vari
         gradient.segment<2>(2 * k) = state_.normal_planes[k].basis.transpose() * point_gradient.col(k);
     }
     for (int i = 0; i < state_.piece_count; ++i){
-        gradient.tail(state_.piece_count)[i] = (time_gradient[i] + param_.weights.time) * 
-                                               timeDerivative(variables.tail(state_.piece_count)[i]);
+        gradient.tail(state_.piece_count)[i] = (time_gradient[i] + param_.weight_time) * 
+                                                timeDerivative(variables.tail(state_.piece_count)[i]);
     } 
 }
 
 bool Omni_3d_Optimizer::CheckTrajectory()
 {
-    const auto tr = minco_.getTraj();
-    const auto durations = tr.getDurations();
-    const double resolution = state_.input->map->resolution();
-    const double duration = tr.getTotalDuration();
+    auto tr = minco_.getTraj();
+    auto durations = tr.getDurations();
+    double resolution = state_.input->map->resolution();
+    int end = checkEnd();
+    int end_piece = std::min(end / param_.integration_intervals, state_.piece_count - 1);
+    double duration = durations.head(end_piece).sum() + durations[end_piece] *
+        (end - end_piece * param_.integration_intervals) / param_.integration_intervals;
 
-    const double step = std::min(resolution / param_.limits.velocity, 
-                                 durations.minCoeff() / param_.integration_intervals / 1.5);
+    double step = std::min(resolution / param_.max_velocity, 
+                           durations.minCoeff() / param_.integration_intervals / 1.5);
     if (!std::isfinite(step) || step <= 0)
     {
         LOGE(OPTIMIZER_TAG) << "invalid validation step";
@@ -586,14 +597,14 @@ bool Omni_3d_Optimizer::CheckTrajectory()
 
     for (double time = 0;;)
     {
-        const double velocity = tr.getVel(time).norm();
-        if (!std::isfinite(velocity) || velocity > param_.limits.velocity + param_.validation.velocity_tolerance)
+        double velocity = tr.getVel(time).norm();
+        if (!std::isfinite(velocity) || velocity > param_.max_velocity + param_.velocity_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory velocity violation time=" << time << " velocity=" << velocity;
             return false;
         }
-        const double acceleration = tr.getAcc(time).norm();
-        if (!std::isfinite(acceleration) || acceleration > param_.limits.acceleration + param_.validation.acceleration_tolerance)
+        double acceleration = tr.getAcc(time).norm();
+        if (!std::isfinite(acceleration) || acceleration > param_.max_acceleration + param_.acceleration_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory acceleration violation time=" << time << " acceleration=" << acceleration;
             return false;
@@ -610,8 +621,8 @@ bool Omni_3d_Optimizer::CheckTrajectory()
 
     // 轨迹精查发现碰撞后，新增方向约束再重试
     std::vector<std::pair<int, int>> segments;
-    const auto points = minco_.getInitConstraintPoints(param_.integration_intervals);
-    if (!collectCollisionSegments(tr, points, segments))
+    auto points = minco_.getInitConstraintPoints(param_.integration_intervals);
+    if (!collectCollisionSegments(tr, points, segments, end))
         return false;
     if (segments.empty()) return true;
     LOGW(OPTIMIZER_TAG) << "trajectory collision segments=" << segments.size();
@@ -619,60 +630,65 @@ bool Omni_3d_Optimizer::CheckTrajectory()
     return false;
 }
 
-int Omni_3d_Optimizer::obstacleEnd() const
+int Omni_3d_Optimizer::checkEnd() const
 {
-    const int last = state_.piece_count * param_.integration_intervals;
-    return state_.input->touches_goal ? last : last - (last - 1) / 3;    // not fixed goal consider about 2/3 
+    int last = state_.piece_count * param_.integration_intervals;
+    return state_.input->touches_goal ? last : last - (last - 1) / 3;  // 非终点取前约 2/3 
 }
 
 bool Omni_3d_Optimizer::collectCollisionSegments(const poly_traj::Trajectory<3> &trajectory,
                                                  const Eigen::Matrix3Xd &points, 
-                                                 std::vector<std::pair<int, int>> &segments)
+                                                 std::vector<std::pair<int, int>> &segments, int end)
 {
     segments.clear();
-    const auto durations = trajectory.getDurations();
-    const int K = param_.integration_intervals;
-    const int end = obstacleEnd();
-    const double resolution = state_.input->map->resolution();
-    const double step = std::min(resolution / param_.limits.velocity, durations.minCoeff() / K / 1.5);
+    auto durations = trajectory.getDurations();
+    int K = param_.integration_intervals;
+    int end_piece = std::min(end / K, state_.piece_count - 1);
+    double end_time = durations.head(end_piece).sum() + durations[end_piece] * (end - end_piece * K) / K;
+    double resolution = state_.input->map->resolution();
+    double step = std::min(resolution / param_.max_velocity, durations.minCoeff() / K / 1.5);
     if (!std::isfinite(step) || step <= 0)
     {
         LOGE(OPTIMIZER_TAG) << "invalid collision sampling step";
         return false;
     }
-    if (state_.input->map->occupied(trajectory.getPos(0)))
+    Eigen::Vector3d start_position = trajectory.getPos(0);
+    if (state_.input->map->occupied({start_position.x(), start_position.y(), start_position.z()}))
     {
-        LOGW(OPTIMIZER_TAG) << "start in collision position=" << trajectory.getPos(0).transpose();
+        LOGW(OPTIMIZER_TAG) << "start in collision position=" << start_position.transpose();
         return false;
     }
-    if (state_.input->touches_goal && state_.input->map->occupied(trajectory.getPos(durations.sum())))
+    if (state_.input->touches_goal)
     {
-        LOGW(OPTIMIZER_TAG) << "goal in collision position=" << trajectory.getPos(durations.sum()).transpose();
-        return false;
+        Eigen::Vector3d goal_position = trajectory.getPos(durations.sum());
+        if (state_.input->map->occupied({goal_position.x(), goal_position.y(), goal_position.z()}))
+        {
+            LOGW(OPTIMIZER_TAG) << "goal in collision position=" << goal_position.transpose();
+            return false;
+        }
     }
 
     int interval = 0, piece = 0, last_interval = -1;
     double piece_start = 0;
-    Eigen::Vector3d last_position = trajectory.getPos(0);
+    Eigen::Vector3d last_position = start_position;
     constexpr int enough = 2;
     int same = enough + 1, in = -1, out = -1;
     bool previous = false, have_start = false, maybe_end = false;
-    for (double time = 0; time <= durations.sum();)
+    for (double time = 0;;)
     {
         //find time in which index
-        while (interval < end && time >= piece_start + durations[piece] / K *
+        while (interval < end - 1 && time >= piece_start + durations[piece] / K *
                 (interval + 1 - K * piece))
         {
             if (interval + 1 >= K * (piece + 1))
                 piece_start += durations[piece++];
             ++interval;
         }
-        if (interval >= end) break;
-        const Eigen::Vector3d position = trajectory.getPos(time);
-        if (time < 1e-5 || interval != last_interval ||
+        Eigen::Vector3d position = trajectory.getPos(time);
+        if (time < 1e-5 || time == end_time || interval != last_interval ||
             (position - last_position).cwiseAbs().maxCoeff() > resolution / 2)
         {
-            const bool occupied = state_.input->map->occupied(position);
+            bool occupied = state_.input->map->occupied({position.x(), position.y(), position.z()});
             if (occupied && !previous)
             {
                 if (interval == 0 || !have_start)
@@ -700,18 +716,21 @@ bool Omni_3d_Optimizer::collectCollisionSegments(const poly_traj::Trajectory<3> 
             last_position = position;
             last_interval = interval;
         }
+        if (time == end_time) break;
         if (time + step <= time)
         {
             LOGE(OPTIMIZER_TAG) << "collision sampling stalled";
             return false;
         }
-        time += step;
+        time = std::min(time + step, end_time);
     }
 
     if (have_start)
     {
         out = maybe_end ? out : end;
-        while (out < points.cols() && state_.input->map->occupied(points.col(out))) ++out;
+        while (out < points.cols() &&
+            state_.input->map->occupied({points(0, out), points(1, out), points(2, out)}))
+            ++out;
         if (out >= points.cols())
         {
             LOGW(OPTIMIZER_TAG) << "collision segment no exit begin" << in;
@@ -725,7 +744,7 @@ bool Omni_3d_Optimizer::collectCollisionSegments(const poly_traj::Trajectory<3> 
 }
 
 bool Omni_3d_Optimizer::finelyBuildObstacleConstraints(const Eigen::Matrix3Xd &points,
-                                                  std::vector<std::pair<int, int>> segments)
+                                                       std::vector<std::pair<int, int>> segments)
 {
     if (segments.empty()) return true;
 
@@ -735,7 +754,7 @@ bool Omni_3d_Optimizer::finelyBuildObstacleConstraints(const Eigen::Matrix3Xd &p
         std::vector<Eigen::Vector3d> path;
         while (true)
         {
-            const LocalSearchResult result = local_search_.search(*state_.input->map,
+            LocalSearchResult result = local_search_.search(*state_.input->map,
                 points.col(segments[i].second), points.col(segments[i].first),
                 param_.search_cells, param_.search_timeout_ms, path);
             if (result == LocalSearchResult::Success) break;
@@ -759,26 +778,27 @@ bool Omni_3d_Optimizer::finelyBuildObstacleConstraints(const Eigen::Matrix3Xd &p
 }
 
 void Omni_3d_Optimizer::appendObstacleDirections(const Eigen::Matrix3Xd &points,
-                                            const std::vector<Eigen::Vector3d> &path, 
-                                            const std::pair<int, int> &segment,
-                                            const std::pair<int, int> &propagation_segment, 
-                                            bool handle_short_segment)
+                                                 const std::vector<Eigen::Vector3d> &path, 
+                                                 const std::pair<int, int> &segment,
+                                                 const std::pair<int, int> &propagation_segment, 
+                                                 bool handle_short_segment)
 {
-    const double resolution = state_.input->map->resolution();
+    double resolution = state_.input->map->resolution();
     std::vector<bool> generated(points.cols(), false);
     int last = -1;
     for (int j = segment.first + 1; j < segment.second; ++j)
     {
         Eigen::Vector3d intersection;
-        const Eigen::Vector3d p = points.col(j);
+        Eigen::Vector3d p = points.col(j);
         if (!intersectGuide(path, p, points.col(j + 1) - points.col(j - 1), intersection))
             continue;
-        const double length = (intersection - p).norm();
+        double length = (intersection - p).norm();
         if (length <= 1e-5) continue;
-        const Eigen::Vector3d direction = (intersection - p) / length;
+        Eigen::Vector3d direction = (intersection - p) / length;
         for (double distance = length; distance >= 0; distance -= resolution)
         {
-            const bool occupied = state_.input->map->occupied(p + distance * direction);
+            Eigen::Vector3d position = p + distance * direction;
+            bool occupied = state_.input->map->occupied({position.x(), position.y(), position.z()});
             if (occupied || distance < resolution)
             {
                 if (occupied) distance += resolution;
@@ -792,9 +812,9 @@ void Omni_3d_Optimizer::appendObstacleDirections(const Eigen::Matrix3Xd &points,
 
     if (handle_short_segment && segment.second - segment.first == 1)
     {
-        const int first = segment.first;
-        const int j = first == 0 ? 1 : first;
-        const Eigen::Vector3d middle = (points.col(first) + points.col(first + 1)) * 0.5;
+        int first = segment.first;
+        int j = first == 0 ? 1 : first;
+        Eigen::Vector3d middle = (points.col(first) + points.col(first + 1)) * 0.5;
         Eigen::Vector3d intersection;
         if (intersectGuide(path, middle, points.col(first + 1) - points.col(first), intersection) &&
             (intersection - middle).norm() > 0.01)
@@ -821,8 +841,8 @@ bool Omni_3d_Optimizer::allowRebound() const
     if (state_.evaluations <= 3) return false;
     for (int i = 3; i <= state_.sample_points.cols() - 4; ++i)
     {
-        const Eigen::Vector3d a = state_.sample_points.col(i) - state_.sample_points.col(i - 1);
-        const Eigen::Vector3d b = state_.sample_points.col(i + 1) - state_.sample_points.col(i);
+        Eigen::Vector3d a = state_.sample_points.col(i) - state_.sample_points.col(i - 1);
+        Eigen::Vector3d b = state_.sample_points.col(i + 1) - state_.sample_points.col(i);
         if (a.norm() < 1e-12 || b.norm() < 1e-12 || a.normalized().dot(b.normalized()) < 0.87)   //大尖角构造的法平面不适合rebound
             return false;
     }
@@ -832,11 +852,17 @@ bool Omni_3d_Optimizer::allowRebound() const
 void Omni_3d_Optimizer::roughlyCheckConstraintPoints()
 {
     std::vector<std::pair<int, int>> segments;
+    auto occupied = [&](int index)
+    {
+        return state_.input->map->occupied({state_.sample_points(0, index),
+            state_.sample_points(1, index), state_.sample_points(2, index)});
+    };
 
     //寻找需要新加约束的碰撞区间
-    for (int i = 1; i <= obstacleEnd(); ++i)
+    int end = checkEnd();
+    for (int i = 1; i <= end; ++i)
     {
-        if (!state_.input->map->occupied(state_.sample_points.col(i))) continue;
+        if (!occupied(i)) continue;
         bool covered = false;
         for (const auto &constraint : state_.obstacle_constraints[i])
         {
@@ -850,9 +876,9 @@ void Omni_3d_Optimizer::roughlyCheckConstraintPoints()
         if (covered) continue;
 
         int first = i - 1, last = i + 1;
-        while (first >= 0 && state_.input->map->occupied(state_.sample_points.col(first))) 
+        while (first >= 0 && occupied(first)) 
             --first;
-        while (last < state_.sample_points.cols() && state_.input->map->occupied(state_.sample_points.col(last))) 
+        while (last < state_.sample_points.cols() && occupied(last)) 
             ++last;
         if (first < 0)
         {
@@ -876,10 +902,10 @@ void Omni_3d_Optimizer::roughlyCheckConstraintPoints()
     for (std::size_t i = 0; i < segments.size();)
     {
         std::vector<Eigen::Vector3d> path;
-        const LocalSearchResult result = local_search_.search(*state_.input->map,
-            state_.sample_points.col(segments[i].second),
-            state_.sample_points.col(segments[i].first),
-            param_.search_cells, param_.search_timeout_ms, path);
+        LocalSearchResult result = local_search_.search(*state_.input->map,
+                                                         state_.sample_points.col(segments[i].second),
+                                                         state_.sample_points.col(segments[i].first),
+                                                         param_.search_cells, param_.search_timeout_ms, path);
         if (result == LocalSearchResult::Success)
         {
             paths.push_back(std::move(path));
@@ -904,4 +930,4 @@ void Omni_3d_Optimizer::roughlyCheckConstraintPoints()
         appendObstacleDirections(state_.sample_points, paths[i], segments[i], segments[i], false);
     state_.stop_reason = StopReason::Rebound;
 }
-} // namespace traj_opt
+} // namespace navapex::traj_opt

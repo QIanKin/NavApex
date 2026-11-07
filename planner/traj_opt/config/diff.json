@@ -1,7 +1,7 @@
 {
   "collision": {
     "clearance": 0.1,
-    "soft_clearance": 0.5,
+    "soft_clearance": 0.3,
     "soft_scale": 0.05
   },
   "integration_intervals": 10,
@@ -33,13 +33,13 @@
   },
   "validation": {
     "acceleration_tolerance": 0.5,
-    "velocity_tolerance": 0.3,
+    "velocity_tolerance": 0.5,
     "angular_acceleration_tolerance": 0.5,
-    "angular_velocity_tolerance": 0.3
+    "angular_velocity_tolerance": 0.5
   },
   "weights": {
     "feasibility": 10000.0,
-    "obstacle": 10000.0,
+    "obstacle": 100000.0,
     "obstacle_soft": 5000.0,
     "smoothness": 1.0,
     "sqrvariance": 10000.0,

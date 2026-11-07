@@ -8,13 +8,13 @@
 #include <string>
 #include <string_view>
 
-namespace poly_traj
+namespace navapex::poly_traj
 {
 template <int Dim> class Trajectory;
 std::ostream &operator<<(std::ostream &stream, const Trajectory<3> &value);
 }
 
-namespace planner_tools
+namespace navapex::planner_tools
 {
 enum class LogLevel { Debug, Info, Warning, Error };
 enum class LogChannel { Diagnostic, Replay };
@@ -98,20 +98,20 @@ private:
     std::int64_t timestamp_;
     std::optional<std::ostringstream> stream_;
 };
-} // namespace planner_tools
+} // namespace navapex::planner_tools
 
 // for 保证作为单条语句使用时没有悬空 else；过滤后不求值日志实参。
 #define PLANNER_LOG_AT(level, tag)                                                                \
-    for (bool planner_log_once_ = ::planner_tools::logEnabled(level); planner_log_once_;            \
+    for (bool planner_log_once_ = ::navapex::planner_tools::logEnabled(level); planner_log_once_;            \
          planner_log_once_ = false)                                                              \
-        ::planner_tools::LogLine(level, tag, __FILE__, __LINE__, __func__)
-#define LOGD(tag) PLANNER_LOG_AT(::planner_tools::LogLevel::Debug, tag)
-#define LOGI(tag) PLANNER_LOG_AT(::planner_tools::LogLevel::Info, tag)
-#define LOGW(tag) PLANNER_LOG_AT(::planner_tools::LogLevel::Warning, tag)
-#define LOGE(tag) PLANNER_LOG_AT(::planner_tools::LogLevel::Error, tag)
+        ::navapex::planner_tools::LogLine(level, tag, __FILE__, __LINE__, __func__)
+#define LOGD(tag) PLANNER_LOG_AT(::navapex::planner_tools::LogLevel::Debug, tag)
+#define LOGI(tag) PLANNER_LOG_AT(::navapex::planner_tools::LogLevel::Info, tag)
+#define LOGW(tag) PLANNER_LOG_AT(::navapex::planner_tools::LogLevel::Warning, tag)
+#define LOGE(tag) PLANNER_LOG_AT(::navapex::planner_tools::LogLevel::Error, tag)
 #define LOG_TRAJECTORY(tag)                                                                       \
-    for (bool planner_log_once_ = ::planner_tools::logEnabled(                                     \
-             ::planner_tools::LogLevel::Info, ::planner_tools::LogChannel::Replay);                \
+    for (bool planner_log_once_ = ::navapex::planner_tools::logEnabled(                                     \
+             ::navapex::planner_tools::LogLevel::Info, ::navapex::planner_tools::LogChannel::Replay);                \
          planner_log_once_; planner_log_once_ = false)                                            \
-        ::planner_tools::LogLine(::planner_tools::LogLevel::Info, tag, __FILE__, __LINE__,          \
-            __func__, ::planner_tools::LogChannel::Replay)
+        ::navapex::planner_tools::LogLine(::navapex::planner_tools::LogLevel::Info, tag, __FILE__, __LINE__,          \
+            __func__, ::navapex::planner_tools::LogChannel::Replay)

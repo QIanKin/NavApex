@@ -7,12 +7,12 @@
 #include <set>
 #include <Eigen/Eigen>
 
-namespace RootFinderParam
+namespace navapex::RootFinderParam
 {
 constexpr size_t highestOrder = 64;
 }
 
-namespace RootFinderPriv
+namespace navapex::RootFinderPriv
 {
 
 inline int polyMod(double *u, double *v, double *r, int lu, int lv)
@@ -733,9 +733,9 @@ inline std::set<double> isolateRealRoots(const Eigen::VectorXd &coeffs, double l
     return rts;
 }
 
-} // namespace RootFinderPriv
+} // namespace navapex::RootFinderPriv
 
-namespace RootFinder
+namespace navapex::RootFinder
 {
 
 inline Eigen::VectorXd polyConv(const Eigen::VectorXd &lCoef, const Eigen::VectorXd &rCoef)
@@ -1085,6 +1085,6 @@ inline std::set<double> solvePolynomial(const Eigen::VectorXd &coeffs, double lb
     return rts;
 }
 
-} // namespace RootFinder
+} // namespace navapex::RootFinder
 
 #endif

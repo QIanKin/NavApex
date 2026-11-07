@@ -1,0 +1,18 @@
+navapex_planner:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    global_costmap_topic: /global_costmap/costmap_raw
+    local_costmap_topic: /local_costmap/costmap_raw
+    odom_topic: /odom
+    goal_topic: /goal_pose
+    cmd_vel_topic: /cmd_vel
+    planning_frequency: 10.0
+    command_frequency: 20.0
+    input_timeout: 0.5
+    map_timeout: 1.0
+    command_timeout: 0.35
+    auto_start: false
+    goal_x: 3.5
+    goal_y: 0.0
+    goal_yaw: 0.0

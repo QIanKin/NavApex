@@ -1,0 +1,21 @@
+{
+  "grid": {
+    "resolution": 0.05,
+    "width": 160,
+    "height": 160
+  },
+  "sensor": {
+    "base_from_laser": { "x": 0.10, "y": 0.02, "yaw": 0.05 },
+    "inf_is_free": false,
+    "self_filter_padding": 0.02
+  },
+  "inflation": {
+    "forbidden_radius": 0.20,
+    "radius": 0.65,
+    "cost_scaling": 5.0
+  },
+  "timing": {
+    "max_pose_scan_dt": 0.01,
+    "max_input_age": 0.20
+  }
+}

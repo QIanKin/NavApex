@@ -1,9 +1,9 @@
 #pragma once
 
-#include <map/occupancy_map.hpp>
+#include <perception/maps/base_map.hpp>
 #include <vector>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 enum class LocalSearchResult
 {
@@ -15,7 +15,7 @@ enum class LocalSearchResult
 class LocalAStar
 {
 public:
-    LocalSearchResult search(const map::OccupancyMap &map,
+    LocalSearchResult search(const perception::OccupancyMap &map,
         Eigen::Vector3d start, Eigen::Vector3d goal, int cells, double timeout_ms,
         std::vector<Eigen::Vector3d> &path);
 
@@ -30,4 +30,4 @@ private:
     std::vector<Node> nodes_;
     unsigned generation_ = 0;
 };
-} // namespace traj_opt
+} // namespace navapex::traj_opt

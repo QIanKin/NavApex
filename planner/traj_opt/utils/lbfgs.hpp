@@ -8,7 +8,7 @@
 #include <cfloat>
 #include <cmath>
 
-namespace planner_lbfgs
+namespace navapex::planner_lbfgs
 {
     // ----------------------- Data Type Part -----------------------
 
@@ -1469,6 +1469,6 @@ namespace planner_lbfgs
         }
     }
 
-} // namespace planner_lbfgs
+} // namespace navapex::planner_lbfgs
 
 #endif

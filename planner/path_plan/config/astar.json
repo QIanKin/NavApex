@@ -1,6 +1,6 @@
 {
   "search": {
-    "search_cells": 100,
-    "timeout_ms": 200
+    "timeout_ms": 200,
+    "max_nodes": 2000000
   }
 }

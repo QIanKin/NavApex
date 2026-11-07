@@ -2,22 +2,23 @@
 
 #include <astar/astar.hpp>
 #include <filesystem>
+#include <planner/config/config_path.hpp>
 #include <utility>
 
-namespace path_plan
+namespace navapex::path_plan
 {
 SearcherInterface::SearcherInterface(const std::string &type,
                                      std::shared_ptr<const SearchInput> input) : type_(type), input_(std::move(input))
 {
-    if (type != "astar2d" && type != "astar3d")
-        throw std::invalid_argument("Unknown searcher type: " + type);
-    if (!input_)
-        throw std::invalid_argument("SearchInput must not be null");
-    const auto path = std::filesystem::path(__FILE__).parent_path() / "config" / "astar.json";
-    searcher_ = std::make_unique<AStar>(type == "astar3d", AStarParams(path.string()), input_);
+    auto path = planner::configPath("path_plan", "astar.json", std::filesystem::path(__FILE__).parent_path() / "config");
+    if(type == "astar3d"){
+        searcher_ = std::make_unique<AStar>(true, AStarParams(path.string()), input_);
+    }else if (type == "astar2d") {
+        searcher_ = std::make_unique<AStar>(false, AStarParams(path.string()), input_);
+    } 
 }
 
-Result SearcherInterface::search()
+SearchResult SearcherInterface::search()
 {
     return searcher_->search();
 }
@@ -26,4 +27,4 @@ const SearcherParams &SearcherInterface::param() const
 {
     return searcher_->param();
 }
-} // namespace path_plan
+} // namespace navapex::path_plan

@@ -1,11 +1,11 @@
 #pragma once
 
 #include <Eigen/Core>
-#include <plan_input.hpp>
+#include <optimizer_io.hpp>
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 struct DiffCost
 {
@@ -30,16 +30,15 @@ struct DiffCost
 
 struct DiffPlanningState
 {
-    std::shared_ptr<const traj_opt::PlanInput> input;
+    std::shared_ptr<const OptimizerInput> input;
 
     int piece_count = 0;
     Eigen::Matrix3Xd sample_points{3, 0};
     double swarm_weight = 0;
-    int evaluations = 0;
 
     bool stop = false;
     DiffCost evaluation_cost;
     std::vector<double> min_swarm_dist_sq;
 };
 
-} // namespace traj_opt
+} // namespace navapex::traj_opt

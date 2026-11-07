@@ -3,6 +3,7 @@
 __pycache__/
 test/
 tests/
+!/perception/tests/
 log/
 .vscode/
 /ros2_test/build/

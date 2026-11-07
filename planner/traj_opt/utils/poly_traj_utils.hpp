@@ -12,7 +12,7 @@
 
 #include <Eigen/Eigen>
 
-namespace poly_traj
+namespace navapex::poly_traj
 {
     template <int Dim> using CoefficientMat = Eigen::Matrix<double, Dim, 6>;
     template <int Dim> using VelCoefficientMat = Eigen::Matrix<double, Dim, 5>;
@@ -1422,4 +1422,4 @@ namespace poly_traj
         EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
     };
 
-} // namespace poly_traj
+} // namespace navapex::poly_traj

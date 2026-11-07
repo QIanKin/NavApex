@@ -3,10 +3,11 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <perception/esdf/esdf_map_2d.hpp>
 #include <tools/log.hpp>
 #include <utils/lbfgs.hpp>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 static constexpr char OPTIMIZER_TAG[] = "optimizer";
 
@@ -42,9 +43,9 @@ double timeDerivative(double x)
     return x > 0 ? x + 1 : (1 - x) / (d * d);
 }
 
-void neighborState(const traj_opt::NeighborTrajectory &n, double t, Eigen::Vector3d &p, Eigen::Vector3d &v)
+void neighborState(const NeighborTrajectory &n, double t, Eigen::Vector3d &p, Eigen::Vector3d &v)
 {
-    const double duration = n.trajectory.getTotalDuration();
+    double duration = n.trajectory.getTotalDuration();
     if (t < 0)
     {
         p = n.trajectory.getPos(0);
@@ -70,34 +71,37 @@ double elapsedMs(std::chrono::steady_clock::time_point start)
 
 } // namespace
 
-Diff_Optimizer::Diff_Optimizer(traj_opt::DiffParams c,
-                           std::shared_ptr<const traj_opt::PlanInput> input) : param_(std::move(c))
+Diff_Optimizer::Diff_Optimizer(DiffParams c,
+                               std::shared_ptr<const OptimizerInput> input) 
+                               : param_(std::move(c))
 {
     state_.input = std::move(input);
     LOGD(OPTIMIZER_TAG) << "create diff_optimizer success";
 }
 
-const traj_opt::DiffParams &Diff_Optimizer::param() const
+const DiffParams &Diff_Optimizer::param() const
 {
     return param_;
 }
 
-traj_opt::Result Diff_Optimizer::optimize()
+OptimizerResult Diff_Optimizer::optimize()
 {
-    const auto start = std::chrono::steady_clock::now();
-    traj_opt::Result result;
+    auto start = std::chrono::steady_clock::now();
+    OptimizerResult result;
     LOGD(OPTIMIZER_TAG) << "optimize start robot_id=" << state_.input->robot_id;
     if (initializePlanning() && runOptimization())
     {
-        result.total_cost = state_.evaluation_cost.total();
         result.trajectory = minco_.getTraj();
-        result.elapsed_ms = elapsedMs(start);
         result.success = true;
         LOGI(OPTIMIZER_TAG) << "optimize success robot_id=" << state_.input->robot_id
-                            << " elapsed_ms=" << result.elapsed_ms;
+                            << " cost=" << state_.evaluation_cost.total()
+                            << " elapsed_ms=" << elapsedMs(start);
         LOG_TRAJECTORY(OPTIMIZER_TAG) << "trajectory robot_id=" << state_.input->robot_id
                                       << " start_time=" << state_.input->start_time << ' '
                                       << result.trajectory;
+    }else{
+        LOGW(OPTIMIZER_TAG) << "optimize failed robot_id=" << state_.input->robot_id
+                            << " elapsed_ms=" << elapsedMs(start);
     }
     return result;
 }
@@ -105,22 +109,23 @@ traj_opt::Result Diff_Optimizer::optimize()
 bool Diff_Optimizer::initializePlanning()
 {
     const auto &input = *state_.input;
-    state_.swarm_weight = param_.weights.swarm;
-    state_.evaluations = 0;
-    state_.stop = false;
-    state_.evaluation_cost = {};
+    state_.swarm_weight = param_.weight_swarm;
     state_.piece_count = static_cast<int>(input.durations.size());
-    state_.min_swarm_dist_sq.assign(input.neighbors.size(), std::numeric_limits<double>::infinity());
+    state_.min_swarm_dist_sq.resize(input.neighbors.size());
     state_.sample_points.resize(3, state_.piece_count * param_.integration_intervals + 1);
 
-    robot_model::Clearance clearance;
+    double clearance = 0;
     // 检查起点终点是否位于障碍物内
-    if (!queryClearance(input.start.position, clearance) || clearance.distance < 0)
+    Pose2D start{input.start.position.x(), input.start.position.y(), input.start.position.z()};
+    input.robot_->clearance(start, *input.esdf, clearance);
+    if (clearance < 0)
     {
         LOGW(OPTIMIZER_TAG) << "start in collision or outside esdf";
         return false;
     }
-    if (input.touches_goal && (!queryClearance(input.goal.position, clearance) || clearance.distance < 0))
+    Pose2D goal{input.goal.position.x(), input.goal.position.y(), input.goal.position.z()};
+    input.robot_->clearance(goal, *input.esdf, clearance);
+    if (clearance < 0)
     {
         LOGW(OPTIMIZER_TAG) << "goal in collision or outside esdf";
         return false;
@@ -150,10 +155,23 @@ bool Diff_Optimizer::runOptimization()
 
     for (int attempt = 0; attempt < param_.max_attempts; ++attempt)
     {
-        const double swarm_weight = state_.swarm_weight;
         // 2.2 迭代求解lbfgs
         if (!solveLbfgs(variables))
             return false;
+        LOGD(OPTIMIZER_TAG) << "solver cost"
+                            << " attempts=" << attempt + 1
+                            << " total=" << state_.evaluation_cost.total()
+                            << " smoothness=" << state_.evaluation_cost.smoothness
+                            << " time=" << state_.evaluation_cost.time
+                            << " obstacle=" << state_.evaluation_cost.obstacle
+                            << " obstacle_soft=" << state_.evaluation_cost.obstacle_soft
+                            << " velocity=" << state_.evaluation_cost.velocity
+                            << " acceleration=" << state_.evaluation_cost.acceleration
+                            << " angular_velocity=" << state_.evaluation_cost.angular_velocity
+                            << " angular_acceleration=" << state_.evaluation_cost.angular_acceleration
+                            << " kinematics=" << state_.evaluation_cost.kinematics
+                            << " spacing=" << state_.evaluation_cost.spacing
+                            << " swarm=" << state_.evaluation_cost.swarm;
 
         // 2.3 优化结束检查轨迹
         bool swarm_safe = true;
@@ -162,8 +180,8 @@ bool Diff_Optimizer::runOptimization()
             const auto &neighbor = state_.input->neighbors[i];
             if (neighbor.robot_id < 0 || neighbor.robot_id == state_.input->robot_id)
                 continue;
-            const double clearance = param_.swarm.validation_scale * 
-                (state_.input->robot_model->radius() + neighbor.clearance + param_.swarm.clearance);
+            double clearance = param_.swarm_validation_scale * 
+                (state_.input->robot_->radius() + neighbor.clearance + param_.swarm_clearance);
             if (state_.min_swarm_dist_sq[i] < clearance * clearance)
             {
                 LOGW(OPTIMIZER_TAG) << "swarm collision robot_id=" << neighbor.robot_id;
@@ -175,20 +193,6 @@ bool Diff_Optimizer::runOptimization()
             state_.swarm_weight *= 2;
         else if (CheckTrajectory())     // check dynamic feasible and static collision
         {
-            LOGD(OPTIMIZER_TAG) << "solver cost"
-                                << " attempts=" << attempt + 1
-                                << " total=" << state_.evaluation_cost.total()
-                                << " smoothness=" << state_.evaluation_cost.smoothness
-                                << " time=" << state_.evaluation_cost.time
-                                << " obstacle=" << state_.evaluation_cost.obstacle
-                                << " obstacle_soft=" << state_.evaluation_cost.obstacle_soft
-                                << " velocity=" << state_.evaluation_cost.velocity
-                                << " acceleration=" << state_.evaluation_cost.acceleration
-                                << " angular_velocity=" << state_.evaluation_cost.angular_velocity
-                                << " angular_acceleration=" << state_.evaluation_cost.angular_acceleration
-                                << " kinematics=" << state_.evaluation_cost.kinematics
-                                << " spacing=" << state_.evaluation_cost.spacing
-                                << " swarm=" << state_.evaluation_cost.swarm;
             return true;
         }
 
@@ -203,35 +207,33 @@ bool Diff_Optimizer::runOptimization()
 // 调用lbfgs求解
 bool Diff_Optimizer::solveLbfgs(Eigen::VectorXd &variables)
 {
-    const auto &config = param_.solver;
     planner_lbfgs::lbfgs_parameter_t p;
     planner_lbfgs::lbfgs_load_default_parameters(&p);
-    p.mem_size = config.mem_size;
-    p.max_iterations = config.max_iterations;
-    p.past = config.past;
-    p.max_linesearch = config.max_linesearch;
-    p.g_epsilon = config.g_epsilon;
-    p.delta = config.delta;
-    p.min_step = config.min_step;
-    p.max_step = config.max_step;
-    p.f_dec_coeff = config.f_dec_coeff;
-    p.s_curv_coeff = config.s_curv_coeff;
-    p.xtol = config.xtol;
-    p.abs_curv_cond = config.abs_curv_cond;
+    p.mem_size = param_.solver_mem_size;
+    p.max_iterations = param_.solver_max_iterations;
+    p.past = param_.solver_past;
+    p.max_linesearch = param_.solver_max_linesearch;
+    p.g_epsilon = param_.solver_g_epsilon;
+    p.delta = param_.solver_delta;
+    p.min_step = param_.solver_min_step;
+    p.max_step = param_.solver_max_step;
+    p.f_dec_coeff = param_.solver_f_dec_coeff;
+    p.s_curv_coeff = param_.solver_s_curv_coeff;
+    p.xtol = param_.solver_xtol;
+    p.abs_curv_cond = param_.solver_abs_curv_cond;
     state_.stop = false;
-    state_.evaluations = 0;
-    const int code = planner_lbfgs::lbfgs_optimize(variables.size(), variables.data(), nullptr,
-                                                   costFunctionCallback, nullptr,
-                                                   progressCallback, this, &p);
+    int code = planner_lbfgs::lbfgs_optimize(variables.size(), variables.data(), nullptr,
+                                             costFunctionCallback, nullptr,
+                                             progressCallback, this, &p);
     if (state_.stop)
     {
         LOGW(OPTIMIZER_TAG) << "solver error stop";
         return false;
     }
-    const bool accepted = code == planner_lbfgs::LBFGS_CONVERGENCE ||
-                          code == planner_lbfgs::LBFGSERR_MAXIMUMITERATION ||
-                          code == planner_lbfgs::LBFGS_ALREADY_MINIMIZED ||
-                          code == planner_lbfgs::LBFGS_STOP;
+    bool accepted = code == planner_lbfgs::LBFGS_CONVERGENCE ||
+                    code == planner_lbfgs::LBFGSERR_MAXIMUMITERATION ||
+                    code == planner_lbfgs::LBFGS_ALREADY_MINIMIZED ||
+                    code == planner_lbfgs::LBFGS_STOP;
     if (!accepted)
     {
         LOGW(OPTIMIZER_TAG) << "solver_failed code=" << code
@@ -246,7 +248,6 @@ double Diff_Optimizer::costFunctionCallback(void *instance, const double *raw, d
 {
     auto &planner = *static_cast<Diff_Optimizer *>(instance);
     Eigen::Map<Eigen::VectorXd> out(grad, n);
-    ++planner.state_.evaluations;
     if (!planner.evaluateCost(Eigen::Map<const Eigen::VectorXd>(raw, n), out))
     {
         planner.state_.stop = true;
@@ -263,7 +264,7 @@ int Diff_Optimizer::progressCallback(void *instance,const double *,const double 
 }
 
 bool Diff_Optimizer::evaluateCost(Eigen::Ref<const Eigen::VectorXd> variables,
-                                Eigen::Ref<Eigen::VectorXd> gradient)
+                                  Eigen::Ref<Eigen::VectorXd> gradient)
 {
     state_.evaluation_cost = {};
     std::fill(state_.min_swarm_dist_sq.begin(), state_.min_swarm_dist_sq.end(),
@@ -279,10 +280,9 @@ bool Diff_Optimizer::evaluateCost(Eigen::Ref<const Eigen::VectorXd> variables,
 
     // 2.2.2 更新代价和梯度 (ci梯度更新在minco_内)
     addJerkCost(time_gradient);                                                // jerk 代价函数
-    if (!addPenaltyCosts(time_gradient))                                       // 时间积分罚函数
-        return false;
+    addPenaltyCosts(time_gradient);                                            // 时间积分罚函数
     addSpacingCost(time_gradient);                                             // 间距惩罚函数
-    state_.evaluation_cost.time = param_.weights.time * minco_.get_T1().sum(); // 时间项函数
+    state_.evaluation_cost.time = param_.weight_time * minco_.get_T1().sum();  // 时间项函数
     propagateGradient(variables, time_gradient, gradient);                     // 回传梯度
 
     if (!std::isfinite(state_.evaluation_cost.total()) || !gradient.allFinite())
@@ -312,36 +312,36 @@ bool Diff_Optimizer::decodeVariables(Eigen::Ref<const Eigen::VectorXd> variables
 void Diff_Optimizer::addJerkCost(Eigen::VectorXd &time_gradient)
 {
     minco_.initGradCost(time_gradient, state_.evaluation_cost.smoothness);
-    state_.evaluation_cost.smoothness *= param_.weights.smoothness;
-    minco_.get_gdC() *= param_.weights.smoothness;
-    time_gradient *= param_.weights.smoothness;
+    state_.evaluation_cost.smoothness *= param_.weight_smoothness;
+    minco_.get_gdC() *= param_.weight_smoothness;
+    time_gradient *= param_.weight_smoothness;
 }
 
-bool Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
+void Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
 {
     const auto &coefficients = minco_.get_b();
-    const int K = param_.integration_intervals;
-    const int obs_end = obstacleEnd();
+    int K = param_.integration_intervals;
+    int check_end = checkEnd();
     double elapsed = 0;
 
     for (int i = 0; i < state_.piece_count; ++i)
     {
-        const auto c = coefficients.block<6, 3>(6 * i, 0);
-        const double h = minco_.get_T1()[i] / K;
+        auto c = coefficients.block<6, 3>(6 * i, 0);
+        double h = minco_.get_T1()[i] / K;
         for (int j = 0; j <= K; ++j)
         {
-            const double alpha = double(j) / K;
-            const double t = alpha * minco_.get_T1()[i];
-            const double w = (j == 0 || j == K) ? 0.5 : 1.0;
+            double alpha = double(j) / K;
+            double t = alpha * minco_.get_T1()[i];
+            double w = (j == 0 || j == K) ? 0.5 : 1.0;
 
-            const auto b0 = basis(t);
-            const auto b1 = basis(t, 1);
-            const auto b2 = basis(t, 2);
+            auto b0 = basis(t);
+            auto b1 = basis(t, 1);
+            auto b2 = basis(t, 2);
 
-            const Eigen::Vector3d p = c.transpose() * b0;
-            const Eigen::Vector3d v = c.transpose() * b1;
-            const Eigen::Vector3d a = c.transpose() * b2;
-            const Eigen::Vector3d jer = c.transpose() * basis(t, 3);
+            Eigen::Vector3d p = c.transpose() * b0;
+            Eigen::Vector3d v = c.transpose() * b1;
+            Eigen::Vector3d a = c.transpose() * b2;
+            Eigen::Vector3d jer = c.transpose() * basis(t, 3);
 
             state_.sample_points.col(i * K + j) = p;
             Eigen::Vector3d gp = Eigen::Vector3d::Zero();
@@ -351,36 +351,34 @@ bool Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
             double explicit_time = 0;
 
             //静态避障
-            if (i * K + j > 0 && i * K + j <= obs_end)
+            if (i * K + j > 0)
             {
-                robot_model::Clearance clearance;
-                if (!queryClearance(p, clearance))
-                {
-                    LOGW(OPTIMIZER_TAG) << "esdf footprint query failed";
-                    return false;
-                }
-                const double hard = param_.collision.clearance - clearance.distance;
-                const double soft = param_.collision.soft_clearance - clearance.distance;
+                double clearance = 0;
+                Eigen::Vector3d gradient;
+                state_.input->robot_->clearanceSmooth(
+                    {p.x(), p.y(), p.z()}, *state_.input->esdf, clearance, gradient);
+                double hard = param_.collision_clearance - clearance;
+                double soft = param_.collision_soft_clearance - clearance;
                 if (hard > 0)
                 {
-                    const double f = param_.weights.obstacle * hard * hard * hard;
+                    double f = param_.weight_obstacle * hard * hard * hard;
                     state_.evaluation_cost.obstacle += w * h * f;
                     integrand += f;
-                    gp -= 3 * param_.weights.obstacle * hard * hard * clearance.gradient;
+                    gp -= 3 * param_.weight_obstacle * hard * hard * gradient;
                 }
                 if (soft > 0)
                 {
-                    const double r = param_.collision.soft_scale;
-                    const double q = std::sqrt(1 + soft * soft / (r * r));
-                    const double f = param_.weights.obstacle_soft * r * r * (q - 1);
+                    double r = param_.collision_soft_scale;
+                    double q = std::sqrt(1 + soft * soft / (r * r));
+                    double f = param_.weight_obstacle_soft * r * r * (q - 1);
                     state_.evaluation_cost.obstacle_soft += w * h * f;
                     integrand += f;
-                    gp -= param_.weights.obstacle_soft * soft / q * clearance.gradient;
+                    gp -= param_.weight_obstacle_soft * soft / q * gradient;
                 }
             }
 
             //集群避障
-            if (i * K + j > 0 && i * K + j <= obs_end)
+            if (i * K + j > 0)
             {
                 for(std::size_t neighbor_index = 0; neighbor_index < state_.input->neighbors.size(); ++neighbor_index)
                 {
@@ -391,19 +389,20 @@ bool Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
                     Eigen::Vector3d np;
                     Eigen::Vector3d nv;
                     neighborState(n, (state_.input->start_time - n.start_time) + elapsed + t, np, nv);
-                    const Eigen::Vector2d diff = (p - np).head<2>();
-                    const double safe = param_.swarm.penalty_scale * (state_.input->robot_model->radius() + n.clearance + param_.swarm.clearance);
-                    const double distance_squared = diff.squaredNorm();
-                    state_.min_swarm_dist_sq[neighbor_index] = std::min(state_.min_swarm_dist_sq[neighbor_index], distance_squared);
-                    const double violation = safe * safe - distance_squared;
+                    Eigen::Vector2d diff = (p - np).head<2>();
+                    double safe = param_.swarm_penalty_scale * (state_.input->robot_->radius() + n.clearance + param_.swarm_clearance);
+                    double distance_squared = diff.squaredNorm();
+                    if (i * K + j <= check_end)
+                        state_.min_swarm_dist_sq[neighbor_index] = std::min(state_.min_swarm_dist_sq[neighbor_index], distance_squared);
+                    double violation = safe * safe - distance_squared;
                     if (violation > 0)
                     {
-                        const double f = state_.swarm_weight * violation * violation * violation;
-                        const Eigen::Vector2d g = -6 * state_.swarm_weight * violation * violation * diff;
+                        double f = state_.swarm_weight * violation * violation * violation;
+                        Eigen::Vector2d g = -6 * state_.swarm_weight * violation * violation * diff;
                         state_.evaluation_cost.swarm += w * h * f;
                         integrand += f;
                         gp.head<2>() += g;
-                        const double previous = -g.dot(nv.head<2>());
+                        double previous = -g.dot(nv.head<2>());
                         explicit_time += previous;
                         if (i > 0)
                             time_gradient.head(i).array() += w * h * previous;
@@ -413,35 +412,35 @@ bool Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
 
             // 运动学一致性
             {
-                const Eigen::Vector2d heading(std::cos(p.z()), std::sin(p.z()));
-                const Eigen::Vector2d normal(-heading.y(), heading.x());
-                const double alignment = normal.dot(v.head<2>());           //横向速度
-                const double forward = heading.dot(v.head<2>());            //前进速度
-                const double backward = std::min(forward, 0.0);             //不允许倒车
-                const double kinematic_cost = param_.weights.kinematics * (alignment * alignment + backward * backward);
+                Eigen::Vector2d heading(std::cos(p.z()), std::sin(p.z()));
+                Eigen::Vector2d normal(-heading.y(), heading.x());
+                double alignment = normal.dot(v.head<2>());           //横向速度
+                double forward = heading.dot(v.head<2>());            //前进速度
+                double backward = std::min(forward, 0.0);             //不允许倒车
+                double kinematic_cost = param_.weight_kinematics * (alignment * alignment + backward * backward);
                 state_.evaluation_cost.kinematics += w * h * kinematic_cost;
                 integrand += kinematic_cost;
-                gp.z() += 2 * param_.weights.kinematics * alignment * (backward - forward);
-                gv.head<2>() += 2 * param_.weights.kinematics * (alignment * normal + backward * heading);
+                gp.z() += 2 * param_.weight_kinematics * alignment * (backward - forward);
+                gv.head<2>() += 2 * param_.weight_kinematics * (alignment * normal + backward * heading);
             }
             
             // 运动可行性
             auto feasibility = [&](double squared_value, double limit, double &part)
             {
-                const double violation = squared_value - limit * limit;
+                double violation = squared_value - limit * limit;
                 if (violation <= 0) return 0.0;
-                const double f = param_.weights.feasibility * violation * violation * violation;
+                double f = param_.weight_feasibility * violation * violation * violation;
                 part += w * h * f;
                 integrand += f;
-                return 6 * param_.weights.feasibility * violation * violation;
+                return 6 * param_.weight_feasibility * violation * violation;
             };
-            gv.head<2>() += feasibility(v.head<2>().squaredNorm(), param_.limits.velocity,
+            gv.head<2>() += feasibility(v.head<2>().squaredNorm(), param_.max_velocity,
                                         state_.evaluation_cost.velocity) * v.head<2>();
-            ga.head<2>() += feasibility(a.head<2>().squaredNorm(), param_.limits.acceleration,
+            ga.head<2>() += feasibility(a.head<2>().squaredNorm(), param_.max_acceleration,
                                         state_.evaluation_cost.acceleration) * a.head<2>();
-            gv.z() += feasibility(v.z() * v.z(), param_.limits.angular_velocity,
+            gv.z() += feasibility(v.z() * v.z(), param_.max_angular_velocity,
                                   state_.evaluation_cost.angular_velocity) * v.z();
-            ga.z() += feasibility(a.z() * a.z(), param_.limits.angular_acceleration,
+            ga.z() += feasibility(a.z() * a.z(), param_.max_angular_acceleration,
                                   state_.evaluation_cost.angular_acceleration) * a.z();
 
             minco_.get_gdC().block<6, 3>(6 * i, 0) += w * h *
@@ -451,21 +450,20 @@ bool Diff_Optimizer::addPenaltyCosts(Eigen::VectorXd &time_gradient)
         }
         elapsed += minco_.get_T1()[i];
     }
-    return true;
 }
 
 void Diff_Optimizer::addSpacingCost(Eigen::VectorXd &time_gradient)
 {
     const auto &coefficients = minco_.get_b();
-    const int K = param_.integration_intervals;
+    int K = param_.integration_intervals;
     Eigen::Matrix3Xd sample_gradient = Eigen::Matrix3Xd::Zero(3, state_.sample_points.cols());
-    const int edges = state_.sample_points.cols() - 1;
+    int edges = state_.sample_points.cols() - 1;
     for (int k = 0; k < edges; ++k)
     {
-        const Eigen::Vector2d d = (state_.sample_points.col(k + 1) - state_.sample_points.col(k)).head<2>();
-        const double d2 = d.squaredNorm();
-        state_.evaluation_cost.spacing += param_.weights.sqrvariance * d2 * d2 / edges;
-        const Eigen::Vector2d g = 4 * param_.weights.sqrvariance * d2 / edges * d;
+        Eigen::Vector2d d = (state_.sample_points.col(k + 1) - state_.sample_points.col(k)).head<2>();
+        double d2 = d.squaredNorm();
+        state_.evaluation_cost.spacing += param_.weight_sqrvariance * d2 * d2 / edges;
+        Eigen::Vector2d g = 4 * param_.weight_sqrvariance * d2 / edges * d;
         sample_gradient.col(k).head<2>() -= g;
         sample_gradient.col(k + 1).head<2>() += g;
     }
@@ -485,8 +483,8 @@ void Diff_Optimizer::addSpacingCost(Eigen::VectorXd &time_gradient)
 }
 
 void Diff_Optimizer::propagateGradient(Eigen::Ref<const Eigen::VectorXd> variables,
-                                     Eigen::VectorXd &time_gradient,
-                                     Eigen::Ref<Eigen::VectorXd> gradient)
+                                       Eigen::VectorXd &time_gradient,
+                                       Eigen::Ref<Eigen::VectorXd> gradient)
 {
     Eigen::Matrix3Xd point_gradient(3, state_.piece_count - 1);
     minco_.getGrad2TP(time_gradient, point_gradient);
@@ -494,20 +492,25 @@ void Diff_Optimizer::propagateGradient(Eigen::Ref<const Eigen::VectorXd> variabl
         gradient.segment<3>(3 * k) = point_gradient.col(k);
     }
     for (int i = 0; i < state_.piece_count; ++i){
-        gradient.tail(state_.piece_count)[i] = (time_gradient[i] + param_.weights.time) *
-                                               timeDerivative(variables.tail(state_.piece_count)[i]);
+        gradient.tail(state_.piece_count)[i] = (time_gradient[i] + param_.weight_time) *
+                                                timeDerivative(variables.tail(state_.piece_count)[i]);
     }
 }
 
 bool Diff_Optimizer::CheckTrajectory()
 {
-    const auto tr = minco_.getTraj();
-    const auto durations = tr.getDurations();
-    const double resolution = state_.input->esdf->resolution();
-    const double duration = tr.getTotalDuration();
+    auto tr = minco_.getTraj();
+    auto durations = tr.getDurations();
+    double resolution = state_.input->esdf->resolution();
+    double duration = tr.getTotalDuration();
+    const auto &robot = state_.input->robot_;
+    int end = checkEnd();
+    int end_piece = std::min(end / param_.integration_intervals, state_.piece_count - 1);
+    double check_duration = durations.head(end_piece).sum() + durations[end_piece] *
+        (end - end_piece * param_.integration_intervals) / param_.integration_intervals;
 
-    const double step = std::min(resolution / param_.limits.velocity,
-                                 durations.minCoeff() / param_.integration_intervals / 1.5);
+    double step = std::min(resolution / (2 * (param_.max_velocity + param_.velocity_tolerance)),
+                           durations.minCoeff() / param_.integration_intervals / 1.5);
     if (!std::isfinite(step) || step <= 0)
     {
         LOGE(OPTIMIZER_TAG) << "invalid validation step";
@@ -516,52 +519,60 @@ bool Diff_Optimizer::CheckTrajectory()
 
     for (double time = 0;;)
     {
-        const Eigen::Vector3d v = tr.getVel(time);
-        const Eigen::Vector3d a = tr.getAcc(time);
-        const double velocity = v.head<2>().norm();
-        if (!std::isfinite(velocity) || velocity > param_.limits.velocity + param_.validation.velocity_tolerance)
+        double clearance = 0;
+        Eigen::Vector3d position = tr.getPos(time);
+        robot->clearance({position.x(), position.y(), position.z()}, *state_.input->esdf, clearance);
+        if (clearance < 0)
+        {
+            LOGW(OPTIMIZER_TAG) << "trajectory collision"
+                                << " time=" << time << " duration=" << duration
+                                << " check_duration=" << check_duration
+                                << " position=" << position.transpose()
+                                << " clearance=" << clearance;
+            return false;
+        }
+        Eigen::Vector3d v = tr.getVel(time);
+        Eigen::Vector3d a = tr.getAcc(time);
+        double velocity = v.head<2>().norm();
+        if (!std::isfinite(velocity) || velocity > param_.max_velocity + param_.velocity_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory velocity violation time=" << time << " velocity=" << velocity;
             return false;
         }
-        const double acceleration = a.head<2>().norm();
-        if (!std::isfinite(acceleration) || acceleration > param_.limits.acceleration + param_.validation.acceleration_tolerance)
+        double acceleration = a.head<2>().norm();
+        if (!std::isfinite(acceleration) || acceleration > param_.max_acceleration + param_.acceleration_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory acceleration violation time=" << time << " acceleration=" << acceleration;
             return false;
         }
-        const double angular_velocity = std::abs(v.z());
-        if (!std::isfinite(angular_velocity) || angular_velocity > param_.limits.angular_velocity + param_.validation.angular_velocity_tolerance)
+        double angular_velocity = std::abs(v.z());
+        if (!std::isfinite(angular_velocity) || angular_velocity > param_.max_angular_velocity + param_.angular_velocity_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory angular velocity violation time=" << time << " angular_velocity=" << angular_velocity;
             return false;
         }
-        const double angular_acceleration = std::abs(a.z());
-        if (!std::isfinite(angular_acceleration) || angular_acceleration > param_.limits.angular_acceleration + param_.validation.angular_acceleration_tolerance)
+        double angular_acceleration = std::abs(a.z());
+        if (!std::isfinite(angular_acceleration) || angular_acceleration > param_.max_angular_acceleration + param_.angular_acceleration_tolerance)
         {
             LOGW(OPTIMIZER_TAG) << "trajectory angular acceleration violation time=" << time << " angular_acceleration=" << angular_acceleration;
             return false;
         }
-        if (time == duration)
+        if (time == check_duration)
             break;
         if (time + step <= time)
         {
             LOGE(OPTIMIZER_TAG) << "validation time stalled time=" << time;
             return false;
         }
-        time = std::min(time + step, duration);
+        time = std::min(time + step, check_duration);
     }
     return true;
 }
 
-bool Diff_Optimizer::queryClearance(const Eigen::Vector3d &pose, robot_model::Clearance &result) const
+int Diff_Optimizer::checkEnd() const
 {
-    return state_.input->robot_model->clearance(pose, *state_.input->esdf, result);
-}
-
-int Diff_Optimizer::obstacleEnd() const
-{
-    const int last = state_.piece_count * param_.integration_intervals;
+    int last = state_.piece_count * param_.integration_intervals;
     return state_.input->touches_goal ? last : last - (last - 1) / 3;
 }
-} // namespace traj_opt
+
+} // namespace navapex::traj_opt

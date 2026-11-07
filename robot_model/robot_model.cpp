@@ -1,24 +1,19 @@
 #include "robot_model.hpp"
 
+#include <perception/esdf/esdf_map_2d.hpp>
 #include <cmath>
 #include <stdexcept>
 
-namespace robot_model
+namespace navapex::robot_model
 {
-namespace
+std::shared_ptr<const RobotModel> RobotModel::create(const Config &config)
 {
-/// 保证没有缺省尺寸或非法半径进入碰撞查询。
-void validateRadius(double radius)
-{
-    if (!std::isfinite(radius) || radius <= 0)
-        throw std::invalid_argument("Robot radius must be finite and positive");
+    if (config.shape == "circle") return std::make_shared<CircleModel>(config.radius);
+    if (config.shape == "rectangle") return std::make_shared<RectangleModel>(config.length, config.width);
+    throw std::invalid_argument("Unknown robot model type: " + config.shape);
 }
-} // namespace
 
-CircleModel::CircleModel(double radius) : radius_(radius)
-{
-    validateRadius(radius_);
-}
+CircleModel::CircleModel(double radius) : radius_(radius) {}
 
 const char *CircleModel::type() const
 {
@@ -30,16 +25,52 @@ double CircleModel::radius() const
     return radius_;
 }
 
-bool CircleModel::clearance(const Eigen::Vector3d &pose, const map::EsdfMap2D &esdf,
-                            Clearance &result) const
+bool CircleModel::contains(const Position2D &point, double padding) const
 {
-    map::DistanceQuery2D query;
-    if (!pose.allFinite() || !esdf.query(pose.head<2>(), query) ||
-        !std::isfinite(query.distance) || !query.gradient.allFinite())
-        return false;
-    result.distance = query.distance - radius_;
-    result.gradient << query.gradient, 0;
-    return std::isfinite(result.distance);
+    return std::hypot(point.x, point.y) <= radius_ + padding;
 }
 
-} // namespace robot_model
+RectangleModel::RectangleModel(double length, double width) : length_(length), width_(width) {}
+
+const char *RectangleModel::type() const { return "rectangle"; }
+
+double RectangleModel::radius() const { return std::hypot(length_, width_) / 2; }
+
+bool RectangleModel::contains(const Position2D &point, double padding) const
+{
+    return std::abs(point.x) <= length_ / 2 + padding && std::abs(point.y) <= width_ / 2 + padding;
+}
+
+void RobotModel::clearance(const Pose2D &pose, const map::EsdfMap2D &esdf,
+                           double &distance) const
+{
+    esdf.query(toPosition2D(pose), distance);
+    distance -= radius();
+}
+
+void RobotModel::clearance(const Pose2D &pose, const map::EsdfMap2D &esdf,
+                           double &distance, Eigen::Vector3d &gradient) const
+{
+    Eigen::Vector2d xy_gradient;
+    esdf.query(toPosition2D(pose), distance, xy_gradient);
+    distance -= radius();
+    gradient << xy_gradient, 0;
+}
+
+void RobotModel::clearanceSmooth(const Pose2D &pose, const map::EsdfMap2D &esdf,
+                                 double &distance) const
+{
+    esdf.querySmooth(toPosition2D(pose), distance);
+    distance -= radius();
+}
+
+void RobotModel::clearanceSmooth(const Pose2D &pose, const map::EsdfMap2D &esdf,
+                                 double &distance, Eigen::Vector3d &gradient) const
+{
+    Eigen::Vector2d xy_gradient;
+    esdf.querySmooth(toPosition2D(pose), distance, xy_gradient);
+    distance -= radius();
+    gradient << xy_gradient, 0;
+}
+
+} // namespace navapex::robot_model

@@ -1,0 +1,102 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+Visualization Manager:
+  Global Options:
+    Fixed Frame: map
+    Background Color: 40; 40; 45
+    Frame Rate: 20
+  Displays:
+    - Class: rviz_default_plugins/Map
+      Name: Static Map
+      Enabled: true
+      Alpha: 0.7
+      Topic:
+        Value: /map
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Map
+      Name: Global Inflation
+      Enabled: true
+      Alpha: 0.5
+      Color Scheme: costmap
+      Topic:
+        Value: /global_costmap/costmap
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Map
+      Name: Rolling Local Costmap
+      Enabled: true
+      Alpha: 0.6
+      Color Scheme: costmap
+      Topic:
+        Value: /local_costmap/costmap
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/RobotModel
+      Name: TurtleBot3
+      Enabled: true
+      Visual Enabled: true
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Transient Local
+    - Class: rviz_default_plugins/LaserScan
+      Name: Laser
+      Enabled: true
+      Size (m): 0.025
+      Topic:
+        Value: /scan
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Path
+      Name: Global Path
+      Enabled: true
+      Color: 70; 140; 255
+      Line Style: Lines
+      Line Width: 0.03
+      Topic:
+        Value: /navapex/global_path
+        Durability Policy: Transient Local
+    - Class: rviz_default_plugins/Path
+      Name: Initial Polynomial
+      Enabled: true
+      Color: 255; 170; 50
+      Line Style: Lines
+      Line Width: 0.02
+      Topic:
+        Value: /navapex/initial_path
+    - Class: rviz_default_plugins/Path
+      Name: Optimized Local Trajectory
+      Enabled: true
+      Color: 70; 240; 100
+      Line Style: Lines
+      Line Width: 0.04
+      Topic:
+        Value: /navapex/local_path
+    - Class: rviz_default_plugins/Pose
+      Name: Lookahead
+      Enabled: true
+      Color: 255; 80; 120
+      Shape: Arrow
+      Topic:
+        Value: /navapex/lookahead
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+        Reliability Policy: Reliable
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Target Frame: map
+      Scale: 65
+      X: 1
+      Y: 0
+Window Geometry:
+  Width: 1200
+  Height: 800

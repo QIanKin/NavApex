@@ -1,20 +1,20 @@
 #pragma once
 
 #include <Eigen/Core>
-#include <map/occupancy_map.hpp>
+#include <perception/maps/base_map.hpp>
 #include <memory>
 #include <robot_model/robot_model.hpp>
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
-struct State
+
+struct TrajectoryBoundary
 {
     Eigen::Vector3d position = Eigen::Vector3d::Zero();
     Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
     Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
-
     Eigen::Matrix3d matrix() const
     {
         Eigen::Matrix3d m;
@@ -31,20 +31,26 @@ struct NeighborTrajectory
     poly_traj::Trajectory<3> trajectory;
 };
 
-struct PlanInput
+struct OptimizerInput
 {
-    State start;
-    State goal;
+    TrajectoryBoundary start;
+    TrajectoryBoundary goal;
     Eigen::Matrix3Xd inner_points{3, 0};
     Eigen::VectorXd durations;
 
-    std::shared_ptr<const map::OccupancyMap> map;
-    std::shared_ptr<const map::EsdfMap2D> esdf;                 // 2d专属
-    std::shared_ptr<const robot_model::RobotModel> robot_model; // 2d专属
+    std::shared_ptr<const perception::OccupancyMap> map;
+    std::shared_ptr<const map::EsdfMap2D> esdf;
+    std::shared_ptr<const robot_model::RobotModel> robot_;
     std::vector<NeighborTrajectory> neighbors;
     double start_time = 0;
     int robot_id = 0;
-    bool touches_goal = true;
+    bool touches_goal = false;
 };
 
-} // namespace traj_opt
+struct OptimizerResult
+{
+    bool success = false;
+    poly_traj::Trajectory<3> trajectory;
+};
+
+} // namespace navapex::traj_opt

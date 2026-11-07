@@ -1,11 +1,11 @@
 #pragma once
 
 #include <Eigen/Core>
-#include <plan_input.hpp>
+#include <optimizer_io.hpp>
 #include <utils/poly_traj_utils.hpp>
 #include <vector>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
 struct Omni3DCost
 {
@@ -46,7 +46,7 @@ enum class StopReason
 
 struct Omni3DPlanningState
 {
-    std::shared_ptr<const traj_opt::PlanInput> input;
+    std::shared_ptr<const OptimizerInput> input;
 
     std::vector<NormalPlane> normal_planes;
     std::vector<std::vector<ObstacleConstraint>> obstacle_constraints;
@@ -62,4 +62,4 @@ struct Omni3DPlanningState
     std::vector<double> min_swarm_dist_sq;
 };
 
-} // namespace traj_opt
+} // namespace navapex::traj_opt

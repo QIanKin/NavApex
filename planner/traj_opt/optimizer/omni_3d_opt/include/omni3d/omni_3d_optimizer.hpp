@@ -5,18 +5,18 @@
 #include <optimizer/base_optimizer.hpp>
 #include <params/omni_3d_params.hpp>
 
-namespace traj_opt
+namespace navapex::traj_opt
 {
-class Omni_3d_Optimizer final : public traj_opt::Optimizer
+class Omni_3d_Optimizer final : public Optimizer
 {
 public:
-    Omni_3d_Optimizer(traj_opt::Omni3DParams param, std::shared_ptr<const traj_opt::PlanInput> input);
+    Omni_3d_Optimizer(Omni3DParams param, std::shared_ptr<const OptimizerInput> input);
     Omni_3d_Optimizer(const Omni_3d_Optimizer &) = delete;
     Omni_3d_Optimizer &operator=(const Omni_3d_Optimizer &) = delete;
 
-    traj_opt::Result optimize() override;
+    OptimizerResult optimize() override;
 
-    const traj_opt::Omni3DParams &param() const override;
+    const Omni3DParams &param() const override;
 
 private:
     bool initializePlanning();
@@ -44,7 +44,7 @@ private:
 
     bool collectCollisionSegments(const poly_traj::Trajectory<3> &trajectory,
                                   const Eigen::Matrix3Xd &points, 
-                                  std::vector<std::pair<int, int>> &segments);
+                                  std::vector<std::pair<int, int>> &segments, int end);
         
     bool finelyBuildObstacleConstraints(const Eigen::Matrix3Xd &points,
                                         std::vector<std::pair<int, int>> segments);
@@ -59,16 +59,16 @@ private:
 
     bool allowRebound() const;
     
-    int obstacleEnd() const;
+    int checkEnd() const;
     
     // 提供给lbfgs的回调函数
     static double costFunctionCallback(void *instance, const double *variables, double *gradient, int size);
     static int progressCallback(void *instance,const double *,const double *,double,double,double,double,int,int,int);
 
-    traj_opt::Omni3DParams param_;
+    Omni3DParams param_;
     Omni3DPlanningState state_;
 
     poly_traj::MinJerkOpt<3> minco_;
     LocalAStar local_search_;
 };
-} // namespace traj_opt
+} // namespace navapex::traj_opt
