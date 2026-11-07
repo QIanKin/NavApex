@@ -18,21 +18,12 @@ Visualization Manager:
         Durability Policy: Transient Local
         Reliability Policy: Reliable
     - Class: rviz_default_plugins/Map
-      Name: Global Inflation
-      Enabled: true
-      Alpha: 0.5
-      Color Scheme: costmap
-      Topic:
-        Value: /global_costmap/costmap
-        Durability Policy: Transient Local
-        Reliability Policy: Reliable
-    - Class: rviz_default_plugins/Map
       Name: Rolling Local Costmap
       Enabled: true
       Alpha: 0.6
       Color Scheme: costmap
       Topic:
-        Value: /local_costmap/costmap
+        Value: /navapex/local_costmap
         Durability Policy: Transient Local
         Reliability Policy: Reliable
     - Class: rviz_default_plugins/RobotModel

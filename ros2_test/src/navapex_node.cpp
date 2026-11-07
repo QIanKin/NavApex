@@ -1,4 +1,10 @@
-#include <navapex_ros2/nav2_grid_map.hpp>
+#include <perception/perception_interface.hpp>
+#include <perception/maps/grid_map_2d.hpp>
+#include <sensor_msgs/msg/laser_scan.hpp>
+#include <nav_msgs/msg/occupancy_grid.hpp>
+#include <nlohmann/json.hpp>
+#include <fstream>
+#include <deque>
 #include <planner/planner.hpp>
 #include <tools/log.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -21,7 +27,7 @@
 namespace navapex::ros2
 {
 using Steady = std::chrono::steady_clock;
-using Costmap = nav2_msgs::msg::Costmap;
+using MapPtr = std::shared_ptr<const perception::OccupancyMap>;
 
 class NavigationNode final : public rclcpp::Node
 {
@@ -43,22 +49,29 @@ public:
         logging.directory = declare_parameter("log_directory", "log");
         logging.replay = false;
         planner_tools::initLog(logging);
-        planner_ = std::make_unique<planner::Planner>("diff");
-        if (std::abs(planner_->param().control_period * planning_frequency - 1) > 1e-6)
-            throw std::invalid_argument("planning_frequency must match planner controller.period");
-        auto global_topic = declare_parameter("global_costmap_topic", "/global_costmap/costmap_raw");
-        auto local_topic = declare_parameter("local_costmap_topic", "/local_costmap/costmap_raw");
+        auto robot = std::make_shared<robot_model::CircleModel>(declare_parameter("robot_radius", 0.125));
+        planner_ = std::make_unique<planner::Planner>("diff", robot);
+        perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d", robot);
         auto map_qos = rclcpp::QoS(1).reliable().transient_local();
-        global_sub_ = create_subscription<Costmap>(global_topic, map_qos, [this](Costmap::ConstSharedPtr message)
+        map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/map", map_qos);
+        costmap_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/navapex/local_costmap", map_qos);
+        std::ifstream stream(declare_parameter<std::string>("global_map_file", ""));
+        nlohmann::json data;
+        stream >> data;
+        perception::GridGeometry2D geometry;
+        geometry.resolution = data.at("resolution");
+        geometry.width = data.at("width");
+        geometry.height = data.at("height");
+        geometry.origin_x = data.at("origin_x");
+        geometry.origin_y = data.at("origin_y");
+        global_map_ = std::make_shared<perception::GridMap2D>(geometry,
+            data.at("costs").get<std::vector<std::uint8_t>>());
+        map_pub_->publish(mapMessage(*global_map_, now()));
+        scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(declare_parameter("scan_topic", "/scan"),
+            rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::LaserScan::ConstSharedPtr message)
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            global_map_ = std::move(message);
-        });
-        local_sub_ = create_subscription<Costmap>(local_topic, map_qos, [this](Costmap::ConstSharedPtr message)
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            local_map_ = std::move(message);
-            map_received_ = Steady::now();
+            pending_scan_ = std::move(message);
+            processScan();
         });
         odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(declare_parameter("odom_topic", "/odom"),
             rclcpp::SensorDataQoS(), [this](nav_msgs::msg::Odometry::ConstSharedPtr message) { onOdometry(*message); });
@@ -116,7 +129,7 @@ public:
 private:
     struct Snapshot
     {
-        Costmap::ConstSharedPtr global, local;
+        MapPtr global, local;
         RobotState state;
         Eigen::Vector3d goal;
         std::uint64_t version;
@@ -201,23 +214,93 @@ private:
             auto planar_pose = toPose2D(state.pose);
             if (!std::isfinite(planar_pose.x) || !std::isfinite(planar_pose.y) || !std::isfinite(planar_pose.yaw) ||
                 !std::isfinite(state.twist.linear.x) || !std::isfinite(state.twist.angular.z)) return;
-            std::lock_guard<std::mutex> lock(mutex_);
-            double dt = state.stamp - state_.stamp;
-            if (have_state_ && dt > 1e-3 && dt < 0.5)
             {
-                const auto &control = planner_->param();
-                state.acceleration.linear.x = std::clamp((state.twist.linear.x - state_.twist.linear.x) / dt,
-                    -control.max_acceleration, control.max_acceleration);
-                state.acceleration.angular.z = std::clamp((state.twist.angular.z - state_.twist.angular.z) / dt,
-                    -control.max_angular_acceleration, control.max_angular_acceleration);
+                std::lock_guard<std::mutex> lock(mutex_);
+                double dt = state.stamp - state_.stamp;
+                if (have_state_ && dt > 1e-3 && dt < 0.5)
+                {
+                    const auto &control = planner_->param();
+                    state.acceleration.linear.x = std::clamp((state.twist.linear.x - state_.twist.linear.x) / dt,
+                        -control.max_acceleration, control.max_acceleration);
+                    state.acceleration.angular.z = std::clamp((state.twist.angular.z - state_.twist.angular.z) / dt,
+                        -control.max_angular_acceleration, control.max_angular_acceleration);
+                }
+                // 差速车体的横向运动加速度，包含转弯的向心分量。
+                state.acceleration.linear.y = state.twist.linear.x * state.twist.angular.z;
+                state_ = state;
+                have_state_ = true;
+                odom_received_ = Steady::now();
+                state_history_.push_back(state);
+                while (state_history_.size() > 400) state_history_.pop_front();
             }
-            // 差速车体的横向运动加速度，包含转弯的向心分量。
-            state.acceleration.linear.y = state.twist.linear.x * state.twist.angular.z;
-            state_ = state;
-            have_state_ = true;
-            odom_received_ = Steady::now();
+            processScan();
         }
         catch (const tf2::TransformException &) {}
+    }
+
+    // 仅做显示编码转换；规划仍共享感知生成的原始地图。
+    nav_msgs::msg::OccupancyGrid mapMessage(const perception::OccupancyMap &map, rclcpp::Time stamp) const
+    {
+        Eigen::Vector3d lower, upper;
+        map.bounds(lower, upper);
+        nav_msgs::msg::OccupancyGrid message;
+        message.header.frame_id = frame_;
+        message.header.stamp = stamp;
+        message.info.resolution = map.resolution();
+        message.info.width = std::lround((upper.x() - lower.x()) / map.resolution());
+        message.info.height = std::lround((upper.y() - lower.y()) / map.resolution());
+        message.info.origin.position.x = lower.x();
+        message.info.origin.position.y = lower.y();
+        message.info.origin.orientation.w = 1;
+        message.data.reserve(message.info.width * message.info.height);
+        for (unsigned y = 0; y < message.info.height; ++y)
+            for (unsigned x = 0; x < message.info.width; ++x)
+            {
+                auto cost = map.cost({lower.x() + (x + 0.5) * map.resolution(),
+                                      lower.y() + (y + 0.5) * map.resolution(), 0});
+                int value = cost == perception::Unknown ? -1 :
+                            cost == perception::Lethal ? 100 :
+                            cost == perception::Forbidden ? 99 :
+                            cost == 0 ? 0 : 1 + (cost - 1) * 97 / 251;
+                message.data.push_back(static_cast<std::int8_t>(value));
+            }
+        return message;
+    }
+
+    void processScan()
+    {
+        if (!pending_scan_ || state_history_.empty()) return;
+        double stamp = rclcpp::Time(pending_scan_->header.stamp).seconds();
+        double time = now().seconds();
+        if (time < stamp) return;
+        auto nearest = std::min_element(state_history_.begin(), state_history_.end(),
+            [stamp](const RobotState &a, const RobotState &b)
+            { return std::abs(a.stamp - stamp) < std::abs(b.stamp - stamp); });
+        // 等待相邻的真值状态到达，保持真实时间戳，不用当前 pose 冒充扫描时刻的 pose。
+        if (state_history_.back().stamp < stamp &&
+            std::abs(nearest->stamp - stamp) > perception_->param().max_pose_scan_dt) return;
+        auto message = std::move(pending_scan_);
+        auto scan = std::make_shared<perception::LaserScan2D>();
+        scan->stamp = stamp;
+        scan->angle_min = message->angle_min;
+        scan->angle_increment = message->angle_increment;
+        scan->range_min = message->range_min;
+        scan->range_max = message->range_max;
+        scan->time_increment = message->time_increment;
+        scan->ranges.assign(message->ranges.begin(), message->ranges.end());
+        perception::PerceptionInput input;
+        input.state = *nearest;
+        input.sensor = scan;
+        input.now = time;
+        auto result = perception_->update(input);
+        if (!result.success) return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            local_map_ = result.map;
+            map_received_ = Steady::now();
+        }
+        costmap_pub_->publish(mapMessage(*result.map,
+            rclcpp::Time(static_cast<std::int64_t>(result.stamp * 1e9), RCL_ROS_TIME)));
     }
 
     void publishCommand()
@@ -293,9 +376,7 @@ private:
     void planningLoop()
     {
         std::uint64_t planned_version = 0;
-        Costmap::ConstSharedPtr failed_global;
-        Costmap::ConstSharedPtr local_snapshot;
-        std::shared_ptr<const Nav2GridMap> local_adapter;
+        MapPtr failed_global;
         while (true)
         {
             Snapshot snapshot;
@@ -318,13 +399,11 @@ private:
                     storeResult(snapshot, result, "waiting_for_fresh_inputs");
                     continue;
                 }
-                if (snapshot.global->header.frame_id != frame_ || snapshot.local->header.frame_id != frame_)
-                    throw std::invalid_argument("Both costmaps must use the planning global_frame");
                 if (planned_version != snapshot.version || planner_->globalPath().empty())
                 {
                     if (planned_version == snapshot.version && failed_global == snapshot.global) continue;
                     planner::GlobalPlanInput input;
-                    input.map = std::make_shared<Nav2GridMap>(snapshot.global);
+                    input.map = snapshot.global;
                     input.start = toPose2D(snapshot.state.pose);
                     input.goal = {snapshot.goal.x(), snapshot.goal.y(), snapshot.goal.z()};
                     auto global = planner_->planGlobal(input);
@@ -343,12 +422,7 @@ private:
                     LOGI("ros2") << "global success points=" << global.path.size();
                 }
                 planner::LocalPlanInput input;
-                if (local_snapshot != snapshot.local)
-                {
-                    local_snapshot = snapshot.local;
-                    local_adapter = std::make_shared<Nav2GridMap>(snapshot.local);
-                }
-                input.map = local_adapter;
+                input.map = snapshot.local;
                 input.state = snapshot.state;
                 storeResult(snapshot, planner_->planLocal(input));
             }
@@ -366,6 +440,9 @@ private:
     tf2_ros::Buffer tf_;
     tf2_ros::TransformListener listener_;
     std::unique_ptr<planner::Planner> planner_;
+    std::unique_ptr<perception::PerceptionInterface> perception_;
+    std::deque<RobotState> state_history_;
+    sensor_msgs::msg::LaserScan::ConstSharedPtr pending_scan_;
     std::mutex mutex_;
     std::condition_variable wake_;
     std::thread worker_;
@@ -373,10 +450,11 @@ private:
     std::uint64_t goal_version_ = 0, command_version_ = 0;
     Eigen::Vector3d goal_ = Eigen::Vector3d::Zero();
     RobotState state_;
-    Costmap::ConstSharedPtr global_map_, local_map_;
+    MapPtr global_map_, local_map_;
     Steady::time_point odom_received_{}, map_received_{}, command_received_{};
     geometry_msgs::msg::Twist command_;
-    rclcpp::Subscription<Costmap>::SharedPtr global_sub_, local_sub_;
+    rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+    rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_, costmap_pub_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;

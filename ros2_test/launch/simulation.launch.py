@@ -17,7 +17,6 @@ def generate_launch_description():
     turtlebot = Path(get_package_share_directory('turtlebot3_gazebo'))
     use_sim_time = {'use_sim_time': True}
     robot_description = (turtlebot / 'urdf/turtlebot3_burger.urdf').read_text()
-    costmaps = str(share / 'config/costmaps.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='false'),
         DeclareLaunchArgument('rviz', default_value='false'),
@@ -37,28 +36,15 @@ def generate_launch_description():
         Node(package='robot_state_publisher', executable='robot_state_publisher',
              parameters=[use_sim_time, {'robot_description': robot_description}], output='screen'),
         Node(package='gazebo_ros', executable='spawn_entity.py', prefix=['/usr/bin/python3'], arguments=[
-            '-entity', 'burger', '-file', str(turtlebot / 'models/turtlebot3_burger/model.sdf'),
+            '-entity', 'burger', '-file', str(share / 'models/burger.sdf'),
             '-x', '0', '-y', '0', '-z', '0.01'], output='screen'),
         Node(package='tf2_ros', executable='static_transform_publisher', arguments=[
             '--x', '0', '--y', '0', '--z', '0', '--yaw', '0', '--pitch', '0', '--roll', '0',
             '--frame-id', 'map', '--child-frame-id', 'odom'], parameters=[use_sim_time]),
-        Node(package='nav2_map_server', executable='map_server', name='map_server',
-             parameters=[use_sim_time, {'yaml_filename': str(share / 'maps/navapex.yaml')}], output='screen'),
-        Node(package='navapex_ros2', executable='navapex_costmap_node', name='global_costmap',
-             namespace='global_costmap', parameters=[costmaps], output='screen'),
-        Node(package='navapex_ros2', executable='navapex_costmap_node', name='local_costmap',
-             namespace='local_costmap', parameters=[costmaps], output='screen'),
-        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='map_lifecycle_manager',
-             parameters=[use_sim_time, {'autostart': True, 'node_names': ['map_server']}], output='screen'),
-        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager',
-             namespace='global_costmap', parameters=[use_sim_time, {
-                 'autostart': True, 'node_names': ['global_costmap']}], output='screen'),
-        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='lifecycle_manager',
-             namespace='local_costmap', parameters=[use_sim_time, {
-                 'autostart': True, 'node_names': ['local_costmap']}], output='screen'),
         Node(package='navapex_ros2', executable='navapex_node', name='navapex_planner',
              parameters=[str(share / 'config/navapex.yaml'), {
                  'auto_start': ParameterValue(LaunchConfiguration('auto_start'), value_type=bool),
+                 'global_map_file': str(share / 'maps/navapex.json'),
                  'log_directory': LaunchConfiguration('log_directory')}], output='screen'),
         Node(package='rviz2', executable='rviz2', arguments=['-d', str(share / 'rviz/navapex.rviz')],
              parameters=[use_sim_time], condition=IfCondition(LaunchConfiguration('rviz')), output='screen'),

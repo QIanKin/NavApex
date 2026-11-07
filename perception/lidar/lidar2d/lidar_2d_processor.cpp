@@ -23,7 +23,8 @@ const Lidar2DParams& Lidar2DProcessor::param() const
 
 void Lidar2DProcessor::reset()
 {
-    raw_.assign(static_cast<std::size_t>(param_.width) * param_.height, Unknown);
+    raw_.assign(static_cast<std::size_t>(param_.width) * param_.height,
+                param_.track_unknown_space ? Unknown : Free);
     initialized_ = false;
     last_stamp_ = 0;
     origin_ = {};
@@ -58,7 +59,7 @@ void Lidar2DProcessor::moveWindow(Position2D position)
     double shift_x = std::round((next.x - origin_.x) / param_.resolution);
     double shift_y = std::round((next.y - origin_.y) / param_.resolution);
     if (shift_x == 0 && shift_y == 0) return;
-    std::vector<std::uint8_t> moved(raw_.size(), Unknown);
+    std::vector<std::uint8_t> moved(raw_.size(), param_.track_unknown_space ? Unknown : Free);
     if (std::abs(shift_x) < param_.width && std::abs(shift_y) < param_.height)
     {
         int dx = static_cast<int>(shift_x), dy = static_cast<int>(shift_y);
@@ -143,7 +144,7 @@ void Lidar2DProcessor::clearRay(Position2D start, Position2D end)
 std::vector<std::uint8_t> Lidar2DProcessor::inflatedCosts() const
 {
     auto costs = raw_;
-    if (param_.inflation_radius == 0) return costs;
+    if (param_.inflation_radius == 0 && param_.forbidden_radius == 0) return costs;
 
     cv::Mat seeds(param_.height, param_.width, CV_8UC1, cv::Scalar(255));
     bool any = false;

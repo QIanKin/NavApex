@@ -2,8 +2,8 @@ navapex_planner:
   ros__parameters:
     use_sim_time: true
     global_frame: map
-    global_costmap_topic: /global_costmap/costmap_raw
-    local_costmap_topic: /local_costmap/costmap_raw
+    scan_topic: /scan
+    robot_radius: 0.125
     odom_topic: /odom
     goal_topic: /goal_pose
     cmd_vel_topic: /cmd_vel

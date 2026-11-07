@@ -26,7 +26,7 @@ struct LogConfig
     std::string name = "navapex"; // 文件名：<name>.YYYYMMDD-HHMMSS.log
     std::string software_version = "0.1.0";
     std::string system_version = "unspecified";
-    LogLevel level = LogLevel::Info;
+    LogLevel level = LogLevel::Debug;
     bool console = false;
     bool replay = true; // 独立于诊断等级，保持默认记录轨迹的行为
     std::size_t max_file_bytes = 16 * 1024 * 1024;

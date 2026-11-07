@@ -12,6 +12,7 @@ public:
     double resolution = 0.05;
     int width = 160;
     int height = 160;
+    bool track_unknown_space = false;
 
     // 雷达配置
     Pose2D base_from_laser{0.10, 0.02, 0.05};
@@ -19,7 +20,7 @@ public:
     double self_filter_padding = 0.02;
 
     // 禁行区和衰减范围
-    double forbidden_radius = 0.20;
+    double forbidden_radius = 0.05;
     double inflation_radius = 0.65;
     double cost_scaling = 5;
 
@@ -41,6 +42,7 @@ public:
             resolution = v.value("resolution", resolution);
             width = v.value("width", width);
             height = v.value("height", height);
+            track_unknown_space = v.value("track_unknown_space", track_unknown_space);
         }
 
         if (json.contains("sensor"))
