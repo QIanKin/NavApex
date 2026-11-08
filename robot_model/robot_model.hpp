@@ -3,7 +3,6 @@
 #include <Eigen/Core>
 #include <robot_model/robot_state.hpp>
 #include <memory>
-#include <string>
 
 namespace navapex::map
 {
@@ -15,15 +14,7 @@ namespace navapex::robot_model
 class RobotModel
 {
 public:
-    struct Config
-    {
-        std::string shape = "circle";
-        double radius = 0.18;
-        double length = 0.36;
-        double width = 0.30;
-    };
-
-    static std::shared_ptr<const RobotModel> create(const Config &config);
+    static std::shared_ptr<const RobotModel> create();
     virtual ~RobotModel() = default;
     virtual const char *type() const = 0;
     virtual double radius() const = 0; // 平面外接圆半径，供规划的圆形包络检查使用。

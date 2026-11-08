@@ -46,7 +46,7 @@ Gazebo /scan → LaserScan2D + 对应时刻 RobotState → PerceptionInterface
 
 仿真机器人 SDF 在编译目录生成，不修改系统 TurtleBot3 模型。雷达关闭测距噪声，量程 8 米；外参为 `x=-0.032, y=0, yaw=0`。无回波按最大量程清空射线。局部地图随机器人滚动。当前采用导航障碍图策略：`track_unknown_space=false`，初始格子、reset 后的格子及滚动新增格子默认空闲；未观测不会自动生成 255。已标记的障碍仍由后续射线观测清除，不会每帧重置为空闲。只过滤打到自身车体的回波，不强制清空整个车体区域。设置为 `true` 可保留严格未知策略；地图外查询仍返回未知。
 
-全局地图由 `scripts/generate_map.py` 从同一个 `worlds/navapex.world` 的静态 box 碰撞几何生成，分辨率取感知配置（当前 0.05 米），范围 `[-4,6] × [-4,4]`。JSON 的 `costs` 从左下角逐行排列，空闲为 0，实体障碍为 254；从同一份感知配置读取 `forbidden_radius=0.05`，在原始致命格外围生成一格 253 禁行区，包括对角邻格，不递归膨胀。当前生成器面向这个平面、静态 box 场景；更换世界边界、几何类型或增加动态物体时需要相应扩展，动态障碍仍由雷达感知。
+全局地图由 `scripts/generate_map.py` 从同一个 `worlds/navapex.world` 的静态 box 碰撞几何生成，分辨率取 `ros2_test/config/global_map.json`（当前 0.05 米），范围 `[-4,6] × [-4,4]`。JSON 的 `costs` 从左下角逐行排列，空闲为 0，实体障碍为 254；从全局地图自身配置读取 `forbidden_radius`；当前为 `0.0`，不生成 253 禁行区。启用后只在原始致命格外围生成禁行区，不递归膨胀。当前生成器面向这个平面、静态 box 场景；更换世界边界、几何类型或增加动态物体时需要相应扩展，动态障碍仍由雷达感知。
 
 全局 A* 使用地图和机器人半径检查通行；局部 A* 仍是点搜索。两者都通过 `occupied()` 拒绝 253、254、255。局部规划收到感知地图后才生成并缓存 ESDF：只有 254、255 和地图外边框作为距离场障碍，253 与衰减代价均不作为种子，机器人模型再减去自身半径得到净距。禁行圈只影响搜索，不重复加到优化器的机器人半径上。
 
@@ -91,9 +91,21 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 
 ## 配置
 
-ROS 话题、机器人半径和调度频率在 `config/navapex.yaml`；感知的仿真外参及三层代价在 `config/perception/lidar2d.json`。`forbidden_radius` 和膨胀 `radius` 独立配置，不从机器人半径推导。当前分辨率与禁行半径均为 0.05 米，全局和局部使用相同的半格对角线距离补偿，因此对应八邻域的一格误差余量；软膨胀半径仍为 0.65 米。关闭软膨胀也可独立保留禁行圈。
+所有核心参数只在所属模块的 `config` 下维护，模块自行读取，不接受环境变量、launch 参数或配置目录路径覆盖：
 
-优化器使用 `config/traj_opt/diff.json`；规划和搜索配置在构建时从核心目录安装到 `config/planner`、`config/path_plan`。launch 设置 `NAVAPEX_CONFIG_DIR`，可通过 `config_dir:=...` 替换整个配置目录。修改源配置或 world 后重新执行启动脚本即可重新安装。
+| 配置内容 | 项目根目录下的文件 |
+| --- | --- |
+| 机器人形状、尺寸 | `robot_model/config/robot.json` |
+| 感知外参、时间匹配、栅格和膨胀 | `perception/config/lidar2d.json` |
+| 路径搜索 | `planner/path_plan/config/astar.json` |
+| 差速轨迹优化 | `planner/traj_opt/config/diff.json` |
+| 全局与局部规划、控制跟踪 | `planner/config/diff.json` |
+| ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
+| 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
+
+`ros2_test` 不保存核心参数副本。全局地图保留从 world 静态碰撞几何生成的流程，独立读取 `ros2_test/config/global_map.json`，不读取感知配置。核心模块直接读取源目录中的配置文件，修改 JSON 后重启即可生效；重新执行启动脚本会在全局地图配置或 world 改动时重新生成全局地图。修改 ROS YAML 后也通过启动脚本重新安装。
+
+当前保留仿真已测参数：机器人半径 0.125 米，雷达外参 `(-0.032, 0, 0)`，`inf_is_free=true`，禁行半径 0.0 米，软膨胀半径 0.65 米；差速优化积分间隔数 12、求解最多 120 次迭代、障碍权重 50000。`forbidden_radius` 和膨胀 `radius` 独立配置，不从机器人半径推导。
 
 ## 参数核对
 
@@ -104,7 +116,7 @@ ROS 话题、机器人半径和调度频率在 `config/navapex.yaml`；感知的
 | 底盘 box | 0.140 × 0.140 米，中心 x=-0.032 米 |
 | 包含轮子的 XY 范围 | x≈[-0.102, 0.038]，y≈[-0.0890, 0.0890] 米 |
 | 关于 base_footprint 的最小外接圆半径 | 约 0.123709 米 |
-| 实际注入的 CircleModel | 0.125 米，同一实例给感知和规划；原先 0.18 米偏大 |
+| 实际使用的 CircleModel | 0.125 米，同一实例给感知和规划；原先 0.18 米偏大 |
 | 轮距 / 轮径 | 0.160 / 0.066 米，与 SDF 轮子碰撞几何一致 |
 | 轮缘加速度上限 | 保留系统 SDF 的 1.0 m/s²；组合控制需求为 0.4+0.08×1.5=0.52 m/s² |
 | 雷达外参 | x=-0.032、y=0、yaw=0，与 SDF 一致；二维感知忽略高度 |
@@ -112,8 +124,8 @@ ROS 话题、机器人半径和调度频率在 `config/navapex.yaml`；感知的
 | 雷达角度、量程、时间字段 | 直接取实际 `/scan`，不在感知 JSON 中重复定义；当前 time_increment=0 |
 | 测距分辨率 / 地图分辨率 | 0.015 / 0.05 米，分别属于传感器与栅格，不要求相等 |
 | 局部地图 | 160×160，8×8 米；初始和滚动新格默认空闲 |
-| 全局地图 | 200×160，10×8 米；空闲 29596 格、253 禁行 896 格、254 致命 1508 格 |
-| 搜索禁行余量 | 两边 forbidden_radius=0.05 米，对应向外一格 |
+| 全局地图 | 200×160，10×8 米；空闲 30492 格、254 致命 1508 格，无 253 禁行格 |
+| 搜索禁行余量 | 两边 forbidden_radius=0.0 米，不额外生成禁行圈 |
 | 优化器 ESDF | 只考虑 254、255；忽略 253、1～252 |
 | 线速度 / 线加速度 | 控制与优化均为 0.22 m/s、0.4 m/s² |
 | 角速度 / 角加速度 | 控制与优化均为 1.0 rad/s、1.5 rad/s² |
@@ -122,7 +134,7 @@ ROS 话题、机器人半径和调度频率在 `config/navapex.yaml`；感知的
 | 感知时间限制 | pose/scan 差不超过 0.01 秒；输入年龄不超过 0.20 秒 |
 | 到达判定 | 位置 0.10 米、朝向 0.10 rad，并确认停稳 |
 
-核心 `planner/config/diff.json` 中的 `robot_radius=0.18` 只是未注入机器人模型时的后备值。本仿真始终从 ROS 的 `robot_radius=0.125` 实例化并注入模型，搜索和 ESDF 净距查询使用的都是 0.125，不使用后备半径。CircleModel 是实际不规则底盘的圆形包络，不能表达完全相同的非圆轮廓。系统 URDF 供 RViz 和 TF 使用，SDF 供物理仿真使用；两者的高度、脚轮形状和惯量不是逐项相同，本次尺寸核对按实际 SDF 的平面碰撞包络进行。
+机器人尺寸统一由 `robot_model/config/robot.json` 读取，ROS 层和规划层不再单独配置半径。仿真共用同一机器人模型实例，独立使用规划器时也通过机器人模块创建默认模型；搜索和 ESDF 净距查询均使用 0.125 米。CircleModel 是实际不规则底盘的圆形包络，不能表达完全相同的非圆轮廓。系统 URDF 供 RViz 和 TF 使用，SDF 供物理仿真使用；两者的高度、脚轮形状和惯量不是逐项相同，本次尺寸核对按实际 SDF 的平面碰撞包络进行。
 
 轮缘加速度参数的单位按插件中“关节角速度×轮半径”转换后的线速度更新逻辑核对，见 [GazeboRosDiffDrive](https://github.com/ros-simulation/gazebo_ros_pkgs/blob/ros2/gazebo_plugins/src/gazebo_ros_diff_drive.cpp)。
 
@@ -130,4 +142,6 @@ ROS 话题、机器人半径和调度频率在 `config/navapex.yaml`；感知的
 
 `tools/log.hpp` 的 `LogConfig::level` 默认改为 `Debug`，包括 Release 构建。`LOGD`、`LOGI`、`LOGW`、`LOGE` 均可写入文件；`solver cost` 的 total、smoothness、time、obstacle、obstacle_soft 等项默认可见。文件在 `log_directory` 指定目录，启动脚本默认使用项目的 `log/`。`console` 仍默认关闭，日志文件级别与 ROS 控制台级别是两套设置。
 
-本次通过初始、reset、滚动新增格的未知策略检查，一格禁行圈检查，以及 253 搜索阻挡 / ESDF 忽略、254 与 255 参与 ESDF 的检查。已重新运行无界面 Gazebo 闭环：通过 `/goal_pose` 发送 `(3.5,0,0)`，约 34 秒绕过中央障碍并报告 `goal_reached`，位置约 `(3.458,0.035)`，位置误差约 5.5 cm。该次最大命令线速度约 0.18 m/s，最大角速度约 0.708 rad/s；323 次局部规划成功，没有规划失败。再次发送目标后调用取消服务，已确认发布零速度。日志中已验证 `D/optimizer: solver cost` 输出。
+此前在禁行半径 0.05 米、障碍权重 100000 时，通过初始、reset、滚动新增格的未知策略检查，一格禁行圈检查，以及 253 搜索阻挡 / ESDF 忽略、254 与 255 参与 ESDF 的检查。已重新运行无界面 Gazebo 闭环：通过 `/goal_pose` 发送 `(3.5,0,0)`，约 34 秒绕过中央障碍并报告 `goal_reached`，位置约 `(3.458,0.035)`，位置误差约 5.5 cm。该次最大命令线速度约 0.18 m/s，最大角速度约 0.708 rad/s；323 次局部规划成功，没有规划失败。再次发送目标后调用取消服务，已确认发布零速度。日志中已验证 `D/optimizer: solver cost` 输出。
+
+本次配置归属调整已通过 ROS 包编译、50 项感知与优化有效参数逐项对比、跨工作目录读取和旧环境变量覆盖失效检查。全局地图已验证只读取自身配置，生成栅格与拆分前一致。额外的无界面闭环在 100 秒内未到达目标，日志出现局部轨迹碰撞校验失败（`local_optimization_failed`）；本次保留当前调参，不调整规划算法或权重。

@@ -1,7 +1,6 @@
 #include "planner.hpp"
 
 #include <perception/esdf/esdf_map_2d.hpp>
-#include <planner/config/config_path.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -36,7 +35,7 @@ bool lineFree(const perception::OccupancyMap &map, const Eigen::Vector3d &a, con
 } // namespace
 
 Planner::Planner(const std::string &type, std::shared_ptr<const robot_model::RobotModel> robot)
-    : param_(configPath("planner", type + ".json", std::filesystem::path(__FILE__).parent_path() / "config").string())
+    : param_((std::filesystem::path(__FILE__).parent_path() / "config" / (type + ".json")).string())
 {
     if (type != "diff")
         throw std::invalid_argument("Unknown planner type: " + type);
@@ -46,7 +45,7 @@ Planner::Planner(const std::string &type, std::shared_ptr<const robot_model::Rob
     local_searcher_ = std::make_unique<path_plan::SearcherInterface>("astar2d", local_input_);
     optimizer_input_ = std::make_shared<traj_opt::OptimizerInput>();
     optimizer_ = std::make_unique<traj_opt::OptimizerInterface>(type, optimizer_input_);
-    robot_ = robot ? std::move(robot) : std::make_shared<robot_model::CircleModel>(param_.robot_radius);
+    robot_ = robot ? std::move(robot) : robot_model::RobotModel::create();
 }
 
 void Planner::reset()

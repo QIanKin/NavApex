@@ -1,16 +1,26 @@
 #include "robot_model.hpp"
 
 #include <perception/esdf/esdf_map_2d.hpp>
+#include <nlohmann/json.hpp>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 namespace navapex::robot_model
 {
-std::shared_ptr<const RobotModel> RobotModel::create(const Config &config)
+std::shared_ptr<const RobotModel> RobotModel::create()
 {
-    if (config.shape == "circle") return std::make_shared<CircleModel>(config.radius);
-    if (config.shape == "rectangle") return std::make_shared<RectangleModel>(config.length, config.width);
-    throw std::invalid_argument("Unknown robot model type: " + config.shape);
+    auto path = std::filesystem::path(__FILE__).parent_path() / "config" / "robot.json";
+    std::ifstream stream(path);
+    if (!stream) throw std::invalid_argument("Cannot open config: " + path.string());
+    nlohmann::json config;
+    stream >> config;
+    const auto shape = config.at("shape").get<std::string>();
+    if (shape == "circle") return std::make_shared<CircleModel>(config.at("radius").get<double>());
+    if (shape == "rectangle")
+        return std::make_shared<RectangleModel>(config.at("length").get<double>(), config.at("width").get<double>());
+    throw std::invalid_argument("Unknown robot model type: " + shape);
 }
 
 CircleModel::CircleModel(double radius) : radius_(radius) {}

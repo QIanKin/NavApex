@@ -49,7 +49,7 @@ public:
         logging.directory = declare_parameter("log_directory", "log");
         logging.replay = false;
         planner_tools::initLog(logging);
-        auto robot = std::make_shared<robot_model::CircleModel>(declare_parameter("robot_radius", 0.125));
+        auto robot = robot_model::RobotModel::create();
         planner_ = std::make_unique<planner::Planner>("diff", robot);
         perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d", robot);
         auto map_qos = rclcpp::QoS(1).reliable().transient_local();

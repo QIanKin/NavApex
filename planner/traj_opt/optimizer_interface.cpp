@@ -2,7 +2,6 @@
 
 #include <diff/diff_optimizer.hpp>
 #include <filesystem>
-#include <planner/config/config_path.hpp>
 #include <omni3d/omni_3d_optimizer.hpp>
 #include <tools/log.hpp>
 
@@ -14,7 +13,7 @@ OptimizerInterface::OptimizerInterface(const std::string &type,
                                        std::shared_ptr<const OptimizerInput> input) 
                                        : type_(type), input_(std::move(input))
 {
-    auto path = planner::configPath("traj_opt", type + ".json", std::filesystem::path(__FILE__).parent_path() / "config");
+    auto path = std::filesystem::path(__FILE__).parent_path() / "config" / (type + ".json");
     if (type == "omni3d")
         optimizer_ = std::make_unique<Omni_3d_Optimizer>(Omni3DParams(path.string()), input_);
     else if(type == "diff")

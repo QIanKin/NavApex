@@ -1,5 +1,4 @@
 {
-  "robot_radius": 0.18,
   "local": {
     "lookahead_distance": 1.2,
     "waypoint_spacing": 0.4,

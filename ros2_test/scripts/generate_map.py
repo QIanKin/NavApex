@@ -46,7 +46,7 @@ def generate(world, output, config):
                     occupied = True
                     break
             costs.append(254 if occupied else 0)
-    # Match the lidar grid's distance convention. At radius=resolution this
+    # At radius=resolution this
     # marks exactly the eight neighboring cells, without cascading dilation.
     forbidden_radius = config["inflation"]["forbidden_radius"]
     cell_padding = math.sqrt(0.5) * resolution
@@ -88,11 +88,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--world', required=True)
     parser.add_argument('--output', required=True)
-    parser.add_argument('--perception-config', required=True)
     parser.add_argument('--robot')
     parser.add_argument('--robot-output')
     args = parser.parse_args()
-    config = json.loads(Path(args.perception_config).read_text())
+    config = json.loads((Path(__file__).resolve().parents[1] / "config/global_map.json").read_text())
     generate(args.world, args.output, config)
     if args.robot:
         prepare_robot(args.robot, args.robot_output)

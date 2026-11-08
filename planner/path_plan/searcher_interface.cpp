@@ -2,7 +2,6 @@
 
 #include <astar/astar.hpp>
 #include <filesystem>
-#include <planner/config/config_path.hpp>
 #include <utility>
 
 namespace navapex::path_plan
@@ -10,7 +9,7 @@ namespace navapex::path_plan
 SearcherInterface::SearcherInterface(const std::string &type,
                                      std::shared_ptr<const SearchInput> input) : type_(type), input_(std::move(input))
 {
-    auto path = planner::configPath("path_plan", "astar.json", std::filesystem::path(__FILE__).parent_path() / "config");
+    auto path = std::filesystem::path(__FILE__).parent_path() / "config" / "astar.json";
     if(type == "astar3d"){
         searcher_ = std::make_unique<AStar>(true, AStarParams(path.string()), input_);
     }else if (type == "astar2d") {

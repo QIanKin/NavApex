@@ -33,7 +33,6 @@ public:
     double stopped_angular_velocity = 0.05;
     double stopped_duration = 0.2;
 
-    double robot_radius = 0.18;
     explicit PlannerParams(const std::string &path = {})
     {
         if (!path.empty())
@@ -48,7 +47,6 @@ public:
     void read()
     {
         const auto &json = json_;
-        robot_radius = json.value("robot_radius", robot_radius);
         if (json.contains("local"))
         {
             const auto &v = json.at("local");

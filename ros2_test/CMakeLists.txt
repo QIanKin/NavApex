@@ -25,18 +25,14 @@ ament_target_dependencies(navapex_node rclcpp nav_msgs sensor_msgs geometry_msgs
 target_compile_options(navapex_node PRIVATE -Wall -Wextra -Wpedantic)
 install(TARGETS navapex_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY launch config worlds rviz DESTINATION share/${PROJECT_NAME})
-install(DIRECTORY "${NAVAPEX_ROOT}/planner/path_plan/config/" DESTINATION share/${PROJECT_NAME}/config/path_plan)
-install(DIRECTORY "${NAVAPEX_ROOT}/planner/config/" DESTINATION share/${PROJECT_NAME}/config/planner
-  FILES_MATCHING PATTERN "*.json")
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/maps")
 find_package(turtlebot3_gazebo REQUIRED)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-  scripts/generate_map.py worlds/navapex.world config/perception/lidar2d.json)
+  scripts/generate_map.py worlds/navapex.world config/global_map.json)
 execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/generate_map.py"
   --world "${CMAKE_CURRENT_SOURCE_DIR}/worlds/navapex.world"
   --output "${CMAKE_CURRENT_BINARY_DIR}/maps/navapex.json"
-  --perception-config "${CMAKE_CURRENT_SOURCE_DIR}/config/perception/lidar2d.json"
   --robot "${turtlebot3_gazebo_DIR}/../models/turtlebot3_burger/model.sdf"
   --robot-output "${CMAKE_CURRENT_BINARY_DIR}/burger.sdf" COMMAND_ERROR_IS_FATAL ANY)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/maps/navapex.json" DESTINATION share/${PROJECT_NAME}/maps)

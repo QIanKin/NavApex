@@ -45,7 +45,7 @@ add_library(planner::robot_model ALIAS planner_robot_model)
 set_target_properties(planner_robot_model PROPERTIES EXPORT_NAME robot_model)
 target_include_directories(planner_robot_model PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}> $<INSTALL_INTERFACE:include>)
-target_link_libraries(planner_robot_model PUBLIC planner::map PRIVATE planner::esdf)
+target_link_libraries(planner_robot_model PUBLIC planner::map PRIVATE planner::esdf nlohmann_json::nlohmann_json)
 target_compile_options(planner_robot_model PRIVATE -Wall -Wextra -Wpedantic)
 
 set(G3_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/g3log/src)
@@ -160,15 +160,12 @@ install(FILES tools/log.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
 install(FILES planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
 install(DIRECTORY planner/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/params
   FILES_MATCHING PATTERN "*.hpp")
-install(FILES planner/config/config_path.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/config)
 install(EXPORT PlannerTargets NAMESPACE planner:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
 file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/plannerConfig.cmake CONTENT
   "include(CMakeFindDependencyMacro)\nfind_dependency(Eigen3 3.3 NO_MODULE)\nfind_dependency(nlohmann_json 3.2)\nfind_dependency(Threads)\nfind_dependency(OpenCV 4 COMPONENTS core imgproc)\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/PlannerTargets.cmake\")\n")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/plannerConfig.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/licenses)
 install(FILES tools/g3log/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/licenses RENAME g3log-LICENSE)
-install(DIRECTORY planner/traj_opt/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config
-  FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY planner/traj_opt/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/traj_opt
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY planner/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/planner
@@ -176,6 +173,8 @@ install(DIRECTORY planner/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/c
 install(DIRECTORY planner/path_plan/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/path_plan
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY perception/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/perception
+  FILES_MATCHING PATTERN "*.json")
+install(DIRECTORY robot_model/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/robot_model
   FILES_MATCHING PATTERN "*.json")
 
 option(NAVAPEX_BUILD_TESTS "Build perception and planner integration tests" OFF)

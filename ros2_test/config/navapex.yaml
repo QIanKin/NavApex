@@ -3,7 +3,6 @@ navapex_planner:
     use_sim_time: true
     global_frame: map
     scan_topic: /scan
-    robot_radius: 0.125
     odom_topic: /odom
     goal_topic: /goal_pose
     cmd_vel_topic: /cmd_vel
