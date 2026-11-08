@@ -4,6 +4,9 @@
 持续开发中 11.15之前完善
 
 核心源码和模块配置位于 `src/`，`ros2_test/` 为独立的 ROS 2 接入包。
+
+日志回放入口：`python3 tools/log_viewer/main.py`，拖入 `.log` 与轮转文件即可查看定位、实时 costmap、机器人 footprint 及规划轨迹。ROS 默认开启 Debug 和回放记录；详见 [本地日志播放器](tools/log_viewer/README.md)。
+
 g3log 通过 Git submodule 从官方仓库 `KjellKod/g3log` 引入，目录为
 `src/tools/g3log`，固定到官方发布版 `2.6.2`
 （提交 `f7014e42e48d52db0c4c973658a8027dbf7a576e`）。

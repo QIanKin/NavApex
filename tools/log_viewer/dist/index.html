@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NavApex · 日志回放</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <span class="brand-mark">N</span>
+        <div><strong>NavApex</strong><small>导航日志回放 / REPLAY</small></div>
+      </div>
+      <span id="fileStatus">本地解析 · 数据保留在本机</span>
+      <label class="button primary"
+        >导入日志<input id="files" type="file" multiple hidden
+      /></label>
+    </header>
+    <main>
+      <section class="workspace">
+        <div class="toolbar">
+          <div class="clock">
+            <small>记录时间</small><strong id="wallClock">--:--:--.---</strong
+            ><span id="sourceClock">ROS — · +00:00.000</span>
+          </div>
+          <div class="view-tools">
+            <select id="sessions" aria-label="录制会话">
+              <option>尚未导入</option></select
+            ><button id="fit">适配地图</button
+            ><label><input id="follow" type="checkbox" />跟随机器人</label>
+          </div>
+        </div>
+        <div id="stage">
+          <canvas
+            id="map"
+            aria-label="地图、机器人 footprint 和规划轨迹"
+          ></canvas>
+          <div id="empty">
+            <div class="drop-icon">↧</div>
+            <h1>把一次导航，重新看清楚</h1>
+            <p>拖入 .log 与轮转文件，查看每帧规划使用的地图、位姿和轨迹。</p>
+            <label class="button"
+              >选择日志文件<input
+                id="emptyFiles"
+                type="file"
+                multiple
+                hidden /></label
+            ><small>支持多文件 · 无需 ROS 环境 · 本地运行</small>
+          </div>
+          <div id="mapWarning" class="map-warning" hidden></div>
+          <div class="map-footer">
+            <span id="coordinates">拖动平移 · 滚轮缩放</span
+            ><span id="scale">—</span>
+          </div>
+          <div id="dragHint" hidden>松开文件，导入回放</div>
+        </div>
+        <div class="transport">
+          <div class="transport-top">
+            <span id="frameLabel">等待日志</span
+            ><span id="rangeLabel">00:00 / 00:00</span>
+          </div>
+          <input
+            id="seek"
+            type="range"
+            min="0"
+            max="0"
+            value="0"
+            aria-label="回放进度"
+            disabled
+          />
+          <div class="transport-bottom">
+            <div>
+              <button id="prev" aria-label="上一帧">❮</button
+              ><button id="play" class="play" disabled>播放</button
+              ><button id="next" aria-label="下一帧">❯</button
+              ><select id="speed" aria-label="播放速度">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+                <option value="4">4×</option>
+              </select>
+            </div>
+            <select id="mode" aria-label="帧类型">
+              <option value="plans">规划帧</option>
+              <option value="events">全部事件</option>
+            </select>
+          </div>
+        </div>
+      </section>
+      <aside>
+        <section>
+          <div class="section-title">
+            当前帧 <span id="eventBadge" class="badge">未加载</span>
+          </div>
+          <div id="status" class="status">等待导入日志</div>
+          <dl id="details"></dl>
+        </section>
+        <section>
+          <div class="section-title">图层 <small>WORLD / 米</small></div>
+          <div class="layers">
+            <label
+              ><input type="checkbox" data-layer="global" checked /><i
+                style="--color: #7c8b9a"
+              ></i
+              >全局地图</label
+            >
+            <label
+              ><input type="checkbox" data-layer="local" checked /><i
+                style="--color: #b28bfd"
+              ></i
+              >实时 costmap</label
+            >
+            <label
+              ><input type="checkbox" data-layer="robot" checked /><i
+                style="--color: #62e1cf"
+              ></i
+              >机器人 footprint</label
+            >
+            <label
+              ><input type="checkbox" data-layer="trace" checked /><i
+                style="--color: #9baab8"
+              ></i
+              >定位轨迹</label
+            >
+            <label
+              ><input type="checkbox" data-layer="globalPath" checked /><i
+                style="--color: #5a9cfb"
+              ></i
+              >全局路径</label
+            >
+            <label
+              ><input type="checkbox" data-layer="initial" checked /><i
+                style="--color: #f6bc6b"
+              ></i
+              >初始轨迹</label
+            >
+            <label
+              ><input type="checkbox" data-layer="trajectory" checked /><i
+                style="--color: #62e1cf"
+              ></i
+              >优化轨迹</label
+            >
+          </div>
+          <div class="legend">
+            <span><i style="--color: #c364e6"></i>253 禁行</span
+            ><span><i style="--color: #e2e9ef"></i>254 障碍</span
+            ><span><i style="--color: #626b80"></i>255 未知</span>
+          </div>
+        </section>
+        <section class="log-section">
+          <div class="section-title">
+            同步文本日志 <span id="logCount" class="badge">0</span>
+          </div>
+          <input
+            id="filter"
+            placeholder="筛选日志 / optimizer / error"
+            aria-label="筛选文本日志"
+          />
+          <div id="logs"></div>
+        </section>
+      </aside>
+    </main>
+    <footer>
+      <span id="health">回放未开始</span
+      ><span>SPACE 播放 / 暂停 · ← → 逐帧</span>
+    </footer>
+    <div id="notice" role="status" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

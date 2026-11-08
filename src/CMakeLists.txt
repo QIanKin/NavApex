@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 find_package(nlohmann_json 3.2 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(OpenCV 4 REQUIRED COMPONENTS core imgproc)
 
 add_library(planner_utils INTERFACE)
@@ -68,6 +69,13 @@ target_include_directories(planner_log PUBLIC
   PRIVATE ${G3_DIR} ${CMAKE_CURRENT_BINARY_DIR}/generated)
 target_link_libraries(planner_log PRIVATE planner::utils PUBLIC Threads::Threads)
 set_source_files_properties(tools/log.cpp PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic")
+
+add_library(planner_replay STATIC tools/replay.cpp)
+add_library(planner::replay ALIAS planner_replay)
+set_target_properties(planner_replay PROPERTIES EXPORT_NAME replay)
+target_link_libraries(planner_replay PUBLIC planner::map planner::utils nlohmann_json::nlohmann_json
+  PRIVATE ZLIB::ZLIB)
+target_compile_options(planner_replay PRIVATE -Wall -Wextra -Wpedantic)
 
 add_library(planner_params INTERFACE)
 add_library(planner::params ALIAS planner_params)
@@ -136,7 +144,7 @@ target_link_libraries(planner_core PUBLIC planner::optimizer planner::searcher p
 target_compile_options(planner_core PRIVATE -Wall -Wextra -Wpedantic)
 
 include(GNUInstallDirs)
-install(TARGETS planner_utils planner_map planner_log planner_params planner_omni3d planner_diff planner_optimizer planner_robot_model
+install(TARGETS planner_utils planner_map planner_log planner_replay planner_params planner_omni3d planner_diff planner_optimizer planner_robot_model
   planner_search_params planner_astar planner_searcher planner_esdf planner_core planner_perception EXPORT PlannerTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY planner/traj_opt/optimizer/omni_3d_opt/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
@@ -160,13 +168,13 @@ install(DIRECTORY perception/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/perception
   FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY robot_model/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/robot_model
   FILES_MATCHING PATTERN "*.hpp")
-install(FILES tools/log.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
+install(FILES tools/log.hpp tools/replay.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
 install(FILES planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
 install(DIRECTORY planner/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/params
   FILES_MATCHING PATTERN "*.hpp")
 install(EXPORT PlannerTargets NAMESPACE planner:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
 file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/plannerConfig.cmake CONTENT
-  "include(CMakeFindDependencyMacro)\nfind_dependency(Eigen3 3.3 NO_MODULE)\nfind_dependency(nlohmann_json 3.2)\nfind_dependency(Threads)\nfind_dependency(OpenCV 4 COMPONENTS core imgproc)\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/PlannerTargets.cmake\")\n")
+  "include(CMakeFindDependencyMacro)\nfind_dependency(Eigen3 3.3 NO_MODULE)\nfind_dependency(nlohmann_json 3.2)\nfind_dependency(Threads)\nfind_dependency(ZLIB)\nfind_dependency(OpenCV 4 COMPONENTS core imgproc)\ninclude(\"\${CMAKE_CURRENT_LIST_DIR}/PlannerTargets.cmake\")\n")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/plannerConfig.cmake DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/licenses)
 install(FILES tools/g3log/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/licenses RENAME g3log-LICENSE)
@@ -197,4 +205,12 @@ if(NAVAPEX_BUILD_PLANNER_TESTS)
   add_executable(planner_fsm_test planner/tests/planner_fsm_test.cpp)
   target_link_libraries(planner_fsm_test PRIVATE planner::core)
   add_test(NAME planner_fsm_test COMMAND planner_fsm_test)
+endif()
+
+option(NAVAPEX_BUILD_REPLAY_TESTS "Build replay serialization fixture and checks" OFF)
+if(NAVAPEX_BUILD_REPLAY_TESTS)
+  enable_testing()
+  add_executable(replay_test tools/replay_test.cpp)
+  target_link_libraries(replay_test PRIVATE planner::replay)
+  add_test(NAME replay_test COMMAND replay_test "${CMAKE_CURRENT_BINARY_DIR}/replay-fixture")
 endif()

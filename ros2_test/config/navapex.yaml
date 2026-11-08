@@ -11,6 +11,9 @@ navapex_planner:
     input_timeout: 0.5
     map_timeout: 1.0
     command_timeout: 0.35
+    log_replay: true
+    log_max_file_mb: 64
+    log_max_files: 8
     auto_start: false
     goal_x: 3.5
     goal_y: 0.0

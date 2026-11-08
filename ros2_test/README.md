@@ -145,6 +145,10 @@ ROS 层通过 `Planner(robot)` 创建规划器。规划器固定读取 `planner.
 
 ## 日志与验证
 
+已加入定位、感知 costmap、规划输入/结果及实际控制指令的结构化日志，默认开启。每帧规划关联实际使用的地图与状态 ID。地图保存原始 0–255 值，通过后台 gzip + Base64 写入 `.log`；每份轮转文件保留机器人模型等元数据。
+
+本地回放：`python3 tools/log_viewer/main.py`（在项目根目录执行），打开页面后拖入 `.log` 和 `.log.1` 等轮转文件。支持时间轴、逐规划帧切换、costmap、真实半径圆形 footprint、轨迹与文本日志叠加。完整用法和协议见 [日志播放器](../tools/log_viewer/README.md)。ROS YAML 中可配置 `log_replay`、`log_max_file_mb`、`log_max_files`，默认开启、64 MiB、8 个文件。
+
 `src/tools/log.hpp` 的 `LogConfig::level` 默认改为 `Debug`，包括 Release 构建。`LOGD`、`LOGI`、`LOGW`、`LOGE` 均可写入文件；`solver cost` 的 total、smoothness、time、obstacle、obstacle_soft 等项默认可见。文件在 `log_directory` 指定目录，启动脚本默认使用项目的 `log/`。`console` 仍默认关闭，日志文件级别与 ROS 控制台级别是两套设置。
 
 此前在禁行半径 0.05 米、障碍权重 100000 时，通过初始、reset、滚动新增格的未知策略检查，一格禁行圈检查，以及 253 搜索阻挡 / ESDF 忽略、254 与 255 参与 ESDF 的检查。已重新运行无界面 Gazebo 闭环：通过 `/goal_pose` 发送 `(3.5,0,0)`，约 34 秒绕过中央障碍并报告 `goal_reached`，位置约 `(3.458,0.035)`，位置误差约 5.5 cm。该次最大命令线速度约 0.18 m/s，最大角速度约 0.708 rad/s；323 次局部规划成功，没有规划失败。再次发送目标后调用取消服务，已确认发布零速度。日志中已验证 `D/optimizer: solver cost` 输出。

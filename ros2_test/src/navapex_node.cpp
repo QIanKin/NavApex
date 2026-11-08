@@ -1,5 +1,6 @@
 #include <perception/perception_interface.hpp>
 #include <perception/maps/grid_map_2d.hpp>
+#include <perception/params/lidar_2d_params.hpp>
 #include <sensor_msgs/msg/laser_scan.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nlohmann/json.hpp>
@@ -7,6 +8,7 @@
 #include <deque>
 #include <planner/planner.hpp>
 #include <tools/log.hpp>
+#include <tools/replay.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -47,11 +49,25 @@ public:
             throw std::invalid_argument("Invalid node frequency or timeout");
         planner_tools::LogConfig logging;
         logging.directory = declare_parameter("log_directory", "log");
-        logging.replay = false;
+        logging.replay = declare_parameter("log_replay", true);
+        int log_mb = declare_parameter("log_max_file_mb", 64);
+        int log_files = declare_parameter("log_max_files", 8);
+        if (log_mb <= 0 || log_files <= 0) throw std::invalid_argument("Invalid log retention");
+        logging.max_file_bytes = static_cast<std::size_t>(log_mb) * 1024 * 1024;
+        logging.max_files = static_cast<std::size_t>(log_files);
         planner_tools::initLog(logging);
         auto robot = robot_model::RobotModel::create();
         planner_ = std::make_unique<planner::Planner>(robot);
         perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d", robot);
+        const auto &lidar = dynamic_cast<const perception::Lidar2DParams &>(perception_->param());
+        planner_tools::setReplayMetadata(nlohmann::json({{"v", 1}, {"frame", frame_},
+            {"robot", {{"shape", robot->type()}, {"radius", robot->radius()}}},
+            {"planner_type", planner_->param().type}, {"source_clock", "ros"},
+            {"trajectory_axes", {"x", "y", "yaw"}},
+            {"perception", {{"resolution", lidar.resolution}, {"width", lidar.width}, {"height", lidar.height},
+                {"forbidden_radius", lidar.forbidden_radius}, {"inflation_radius", lidar.inflation_radius},
+                {"cost_scaling", lidar.cost_scaling}, {"track_unknown_space", lidar.track_unknown_space},
+                {"base_from_laser", {lidar.base_from_laser.x, lidar.base_from_laser.y, lidar.base_from_laser.yaw}}}}}).dump());
         auto map_qos = rclcpp::QoS(1).reliable().transient_local();
         map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/map", map_qos);
         costmap_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/navapex/local_costmap", map_qos);
@@ -67,6 +83,8 @@ public:
         global_map_ = std::make_shared<perception::GridMap2D>(geometry,
             data.at("costs").get<std::vector<std::uint8_t>>());
         map_pub_->publish(mapMessage(*global_map_, now()));
+        replay::map({{"map_id", "global"}, {"layer", "global"}, {"frame", frame_},
+                     {"stamp", now().seconds()}, {"clock_epoch", 0}}, global_map_);
         scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(declare_parameter("scan_topic", "/scan"),
             rclcpp::SensorDataQoS(), [this](sensor_msgs::msg::LaserScan::ConstSharedPtr message)
         {
@@ -89,6 +107,8 @@ public:
             std::lock_guard<std::mutex> lock(mutex_);
             has_goal_ = false;
             ++goal_version_;
+            replay::event({{"event", "goal"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
+                           {"goal_id", goal_version_}, {"status", "canceled"}});
             publish_stop_ = true;
             response->success = true;
             response->message = "Navigation canceled; manual cmd_vel control is available";
@@ -100,6 +120,8 @@ public:
             goal_ << goal_x, goal_y, goal_yaw;
             has_goal_ = true;
             ++goal_version_;
+            replay::event({{"event", "goal"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
+                           {"goal_id", goal_version_}, {"goal", {goal_x, goal_y, goal_yaw}}, {"status", "new_goal"}});
         }
         plan_timer_ = create_wall_timer(std::chrono::duration<double>(1 / planning_frequency), [this]
         {
@@ -109,6 +131,13 @@ public:
             wake_.notify_one();
         });
         control_timer_ = create_wall_timer(std::chrono::duration<double>(1 / command_frequency), [this] { publishCommand(); });
+        replay_timer_ = create_wall_timer(std::chrono::seconds(5), [this]
+        {
+            replay::health(now().seconds(), clock_epoch_);
+            // 静态地图定期作为检查点重发，轮转日志缺少开头时仍可恢复背景。
+            replay::map({{"map_id", "global"}, {"layer", "global"}, {"frame", frame_},
+                         {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_}}, global_map_);
+        });
         worker_ = std::thread([this] { planningLoop(); });
         publishStatus("waiting_for_goal");
         RCLCPP_INFO(get_logger(), "NavApex ready: %g Hz planning; RViz goal topic /goal_pose", planning_frequency);
@@ -123,10 +152,17 @@ public:
         }
         if (worker_.joinable()) worker_.join();
         if (rclcpp::ok()) cmd_pub_->publish(geometry_msgs::msg::Twist());
-        try { planner_tools::flushLog(); } catch (...) {}
+        try
+        {
+            planner_tools::flushLog();
+            replay::health(now().seconds(), clock_epoch_);
+            planner_tools::flushLog();
+        }
+        catch (...) {}
     }
 
 private:
+    struct RecordedState { RobotState state; std::uint64_t id; };
     struct Snapshot
     {
         MapPtr global, local;
@@ -134,6 +170,7 @@ private:
         Eigen::Vector3d goal;
         std::uint64_t version;
         Steady::time_point captured, odom_received, map_received;
+        std::uint64_t state_id = 0, map_id = 0, plan_id = 0, clock_epoch = 0;
     };
 
     static double age(Steady::time_point timestamp)
@@ -182,6 +219,9 @@ private:
                 goal_ = goal;
                 has_goal_ = true;
                 ++goal_version_;
+                replay::event({{"event", "goal"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
+                               {"goal_id", goal_version_}, {"goal", {goal.x(), goal.y(), goal.z()}},
+                               {"status", "new_goal"}});
                 requested_ = true;
                 wake_.notify_one();
             }
@@ -217,6 +257,7 @@ private:
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 double dt = state.stamp - state_.stamp;
+                if (have_state_ && dt < -0.5) ++clock_epoch_;
                 if (have_state_ && dt > 1e-3 && dt < 0.5)
                 {
                     const auto &control = planner_->param();
@@ -230,8 +271,10 @@ private:
                 state_ = state;
                 have_state_ = true;
                 odom_received_ = Steady::now();
-                state_history_.push_back(state);
+                state_history_.push_back({state, ++state_id_});
                 while (state_history_.size() > 400) state_history_.pop_front();
+                if (replay::enabled()) replay::event({{"event", "pose"}, {"stamp", state.stamp},
+                    {"clock_epoch", clock_epoch_}, {"state_id", state_id_}, {"state", replay::state(state)}});
             }
             processScan();
         }
@@ -274,11 +317,11 @@ private:
         double time = now().seconds();
         if (time < stamp) return;
         auto nearest = std::min_element(state_history_.begin(), state_history_.end(),
-            [stamp](const RobotState &a, const RobotState &b)
-            { return std::abs(a.stamp - stamp) < std::abs(b.stamp - stamp); });
+            [stamp](const RecordedState &a, const RecordedState &b)
+            { return std::abs(a.state.stamp - stamp) < std::abs(b.state.stamp - stamp); });
         // 等待相邻的真值状态到达，保持真实时间戳，不用当前 pose 冒充扫描时刻的 pose。
-        if (state_history_.back().stamp < stamp &&
-            std::abs(nearest->stamp - stamp) > perception_->param().max_pose_scan_dt) return;
+        if (state_history_.back().state.stamp < stamp &&
+            std::abs(nearest->state.stamp - stamp) > perception_->param().max_pose_scan_dt) return;
         auto message = std::move(pending_scan_);
         auto scan = std::make_shared<perception::LaserScan2D>();
         scan->stamp = stamp;
@@ -289,14 +332,24 @@ private:
         scan->time_increment = message->time_increment;
         scan->ranges.assign(message->ranges.begin(), message->ranges.end());
         perception::PerceptionInput input;
-        input.state = *nearest;
+        input.state = nearest->state;
         input.sensor = scan;
         input.now = time;
         auto result = perception_->update(input);
-        if (!result.success) return;
+        auto scan_id = ++scan_id_;
+        if (!result.success)
+        {
+            replay::event({{"event", "perception"}, {"stamp", stamp}, {"clock_epoch", clock_epoch_},
+                {"scan_id", scan_id}, {"state_id", nearest->id}, {"state", replay::state(nearest->state)}, {"success", false}});
+            return;
+        }
+        if (replay::enabled()) replay::map({{"map_id", scan_id}, {"layer", "local"}, {"frame", frame_},
+            {"stamp", result.stamp}, {"clock_epoch", clock_epoch_}, {"scan_id", scan_id},
+            {"state_id", nearest->id}, {"state", replay::state(nearest->state)}, {"success", true}}, result.map);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             local_map_ = result.map;
+            map_id_ = scan_id;
             map_received_ = Steady::now();
         }
         costmap_pub_->publish(mapMessage(*result.map,
@@ -315,6 +368,8 @@ private:
             publish_stop_ = false;
         }
         cmd_pub_->publish(command);
+        replay::event({{"event", "command"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
+                       {"command", {command.linear.x, command.angular.z}}});
     }
 
     bool current(std::uint64_t version)
@@ -336,7 +391,11 @@ private:
             status = result.goal_reached ? "goal_reached" : (result.success ? "planning_success" : "planning_failed");
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!has_goal_ || goal_version_ != snapshot.version || stopping_) return;
+            if (!has_goal_ || goal_version_ != snapshot.version || stopping_)
+            {
+                recordPlan(snapshot, result, "discarded_goal_changed", false);
+                return;
+            }
             command_ = geometry_msgs::msg::Twist();
             if (result.success)
             {
@@ -351,6 +410,7 @@ private:
                 publish_stop_ = true;
             }
         }
+        recordPlan(snapshot, result, status, true);
         publishStatus(status);
         std::vector<Eigen::Vector3d> samples;
         if (result.success && result.trajectory.getPieceNum() > 0)
@@ -373,6 +433,18 @@ private:
                      << " w=" << (result.success ? result.angular_velocity : 0);
     }
 
+    void recordPlan(const Snapshot &snapshot, const planner::LocalPlanResult &result,
+                    const char *status, bool accepted)
+    {
+        if (!replay::enabled()) return;
+        replay::plan({{"stamp", std::isfinite(snapshot.state.stamp) ? snapshot.state.stamp : now().seconds()}, {"clock_epoch", snapshot.clock_epoch},
+            {"plan_id", snapshot.plan_id}, {"state_id", snapshot.state_id}, {"map_id", snapshot.map_id},
+            {"state", snapshot.state_id ? replay::state(snapshot.state) : nlohmann::json(nullptr)}, {"goal_id", snapshot.version},
+            {"goal", {snapshot.goal.x(), snapshot.goal.y(), snapshot.goal.z()}},
+            {"status", status}, {"accepted", accepted}, {"elapsed_ms", age(snapshot.captured) * 1000}},
+            result, planner_->globalPath());
+    }
+
     void planningLoop()
     {
         std::uint64_t planned_version = 0;
@@ -387,6 +459,10 @@ private:
                 requested_ = false;
                 if (!has_goal_) continue;
                 snapshot = {global_map_, local_map_, state_, goal_, goal_version_, Steady::now(), odom_received_, map_received_};
+                snapshot.state_id = state_id_;
+                snapshot.map_id = map_id_;
+                snapshot.plan_id = ++plan_id_;
+                snapshot.clock_epoch = clock_epoch_;
             }
             try
             {
@@ -401,14 +477,22 @@ private:
                 }
                 if (planned_version != snapshot.version || planner_->globalPath().empty())
                 {
-                    if (planned_version == snapshot.version && failed_global == snapshot.global) continue;
+                    if (planned_version == snapshot.version && failed_global == snapshot.global)
+                    {
+                        recordPlan(snapshot, {}, "global_search_failed_cached", false);
+                        continue;
+                    }
                     planner::GlobalPlanInput input;
                     input.map = snapshot.global;
                     input.start = toPose2D(snapshot.state.pose);
                     input.goal = {snapshot.goal.x(), snapshot.goal.y(), snapshot.goal.z()};
                     auto global = planner_->planGlobal(input);
                     planned_version = snapshot.version;
-                    if (!current(snapshot.version)) continue;
+                    if (!current(snapshot.version))
+                    {
+                        recordPlan(snapshot, {}, "discarded_goal_changed", false);
+                        continue;
+                    }
                     global_pub_->publish(pathMessage(global.path));
                     if (!global.success)
                     {
@@ -441,13 +525,14 @@ private:
     tf2_ros::TransformListener listener_;
     std::unique_ptr<planner::Planner> planner_;
     std::unique_ptr<perception::PerceptionInterface> perception_;
-    std::deque<RobotState> state_history_;
+    std::deque<RecordedState> state_history_;
     sensor_msgs::msg::LaserScan::ConstSharedPtr pending_scan_;
     std::mutex mutex_;
     std::condition_variable wake_;
     std::thread worker_;
     bool stopping_ = false, requested_ = false, has_goal_ = false, have_state_ = false, publish_stop_ = false;
     std::uint64_t goal_version_ = 0, command_version_ = 0;
+    std::uint64_t state_id_ = 0, scan_id_ = 0, map_id_ = 0, plan_id_ = 0, clock_epoch_ = 0;
     Eigen::Vector3d goal_ = Eigen::Vector3d::Zero();
     RobotState state_;
     MapPtr global_map_, local_map_;
@@ -462,7 +547,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr lookahead_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cancel_;
-    rclcpp::TimerBase::SharedPtr plan_timer_, control_timer_;
+    rclcpp::TimerBase::SharedPtr plan_timer_, control_timer_, replay_timer_;
 };
 } // namespace navapex::ros2
 

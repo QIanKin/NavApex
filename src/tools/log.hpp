@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <ostream>
 #include <sstream>
@@ -50,6 +51,10 @@ struct LogHealth
 /// 显式管理操作通过异常报告失败；普通日志调用尽力记录，不传播日志自身异常。
 void initLog(const LogConfig &config = {});
 void flushLog();
+// 在现有 sink 线程中编码；bytes 为捕获快照的内存预算，队列仍受 LogConfig 限制。
+void logReplay(std::function<std::string()> encode, std::size_t bytes) noexcept;
+// 元数据写入当前文件，并重复出现在每个轮转文件的头部。
+void setReplayMetadata(const std::string &json);
 std::string logFile();
 LogHealth logHealth() noexcept;
 bool logEnabled(LogLevel level, LogChannel channel = LogChannel::Diagnostic) noexcept;

@@ -112,7 +112,7 @@ public:
                << "# replay_clock=unix_nanoseconds timezone=UTC units=SI numeric_precision=max_digits10\n"
                << "# escaping=backslash_newline_carriage_return\n"
                << "# trajectory_version=1 coefficient_order=descending_local_seconds"
-                  " coefficient_layout=3x6_row_major axis_order=x,y,z\n";
+                  " coefficient_layout=3x6_row_major axis_order=declared_by_producer\n";
         header_ = header.str();
         open();
     }
@@ -169,6 +169,37 @@ public:
         }
         --counters.pending;
         counters.pending_bytes.fetch_sub(bytes);
+    }
+
+    void writeReplay(std::function<std::string()> encode, std::int64_t timestamp,
+        std::uint64_t sequence, std::size_t bytes) noexcept
+    {
+        try
+        {
+            auto text = encode();
+            // 单行转义最多使内容翻倍；限制最终记录而非仅限制原始地图。
+            if (text.size() * 2 + 512 > config_.max_record_bytes)
+                throw std::length_error("Encoded replay record exceeds limit");
+            g3::LogMessage message("replay", 0, "record", INFO);
+            message.write() = std::move(text);
+            write(std::move(message), timestamp, sequence, "replay", LogChannel::Replay, bytes);
+        }
+        catch (...)
+        {
+            --counters.pending;
+            counters.pending_bytes.fetch_sub(bytes);
+            ++counters.dropped;
+            reportLogFailure("Replay encoding failed; frame dropped");
+        }
+    }
+
+    void metadata(const std::string &json)
+    {
+        auto line = "# replay_metadata=" + singleLine(json) + '\n';
+        header_ += line;
+        file_ << line;
+        file_bytes_ += line.size();
+        flush();
     }
 
     void receive(g3::LogMessageMover) {} // 此 sink 仅通过受控的 write 队列提交
@@ -290,6 +321,43 @@ public:
         sink_->call(&FileSink::flush).get();
     }
 
+    void replay(std::function<std::string()> encode, std::size_t bytes)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!config_.replay) return;
+        if (!worker_) initializeLocked(config_);
+        auto sequence = ++sequence_;
+        if (bytes > config_.max_pending_bytes ||
+            counters.pending.load() >= config_.max_pending_records ||
+            bytes > config_.max_pending_bytes - counters.pending_bytes.load())
+        {
+            ++counters.dropped;
+            emergency("Replay dropped: queue limit; inspect logHealth()");
+            return;
+        }
+        ++counters.pending;
+        counters.pending_bytes.fetch_add(bytes);
+        try
+        {
+            sink_->call(&FileSink::writeReplay, std::move(encode), epochNanoseconds(), sequence, bytes);
+            ++counters.submitted;
+        }
+        catch (...)
+        {
+            --counters.pending;
+            counters.pending_bytes.fetch_sub(bytes);
+            ++counters.dropped;
+            throw;
+        }
+    }
+
+    void metadata(const std::string &json)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!worker_) initializeLocked(config_);
+        if (config_.replay) sink_->call(&FileSink::metadata, json).get();
+    }
+
     std::string path()
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -361,6 +429,14 @@ void flushLog()
 }
 
 std::string logFile() { return logger().path(); }
+
+void logReplay(std::function<std::string()> encode, std::size_t bytes) noexcept
+{
+    try { logger().replay(std::move(encode), bytes); }
+    catch (...) { reportLogFailure("Replay submission failed"); }
+}
+
+void setReplayMetadata(const std::string &json) { logger().metadata(json); }
 
 LogHealth logHealth() noexcept
 {

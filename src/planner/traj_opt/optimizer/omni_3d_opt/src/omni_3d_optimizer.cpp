@@ -141,7 +141,7 @@ OptimizerResult Omni_3d_Optimizer::optimize()
                             << " cost=" << state_.evaluation_cost.total()
                             << " elapsed_ms=" << elapsedMs(start);
         LOG_TRAJECTORY(OPTIMIZER_TAG) << "trajectory robot_id=" << state_.input->robot_id
-                                      << " start_time=" << state_.input->start_time << ' '
+                                      << " start_time=" << state_.input->start_time << " trajectory_axes=x,y,z "
                                       << result.trajectory;
     }
     else

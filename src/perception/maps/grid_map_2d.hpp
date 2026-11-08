@@ -32,6 +32,9 @@ struct GridGeometry2D
 class GridMap2D final : public OccupancyMap
 {
 public:
+    const GridGeometry2D &geometry() const noexcept { return geometry_; }
+    const std::vector<std::uint8_t> &data() const noexcept { return costs_; }
+
     GridMap2D(GridGeometry2D geometry, std::vector<std::uint8_t> costs)
               : geometry_(geometry), costs_(std::move(costs))
     {
