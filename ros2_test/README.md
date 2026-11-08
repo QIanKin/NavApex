@@ -7,6 +7,7 @@ ROS 2 Humble + Gazebo Classic + TurtleBot3 Burger。感知、地图、全局搜�
 在项目根目录执行，一次完成编译、Gazebo 和 RViz 启动：
 
 ```bash
+git submodule update --init --recursive
 ./ros2_test/run.sh
 ```
 
@@ -95,11 +96,11 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 
 | 配置内容 | 项目根目录下的文件 |
 | --- | --- |
-| 机器人形状、尺寸 | `robot_model/config/robot.json` |
-| 感知外参、时间匹配、栅格和膨胀 | `perception/config/lidar2d.json` |
-| 路径搜索 | `planner/path_plan/config/astar.json` |
-| 差速轨迹优化 | `planner/traj_opt/config/diff.json` |
-| 全局与局部规划、控制跟踪 | `planner/config/diff.json` |
+| 机器人形状、尺寸 | `src/robot_model/config/robot.json` |
+| 感知外参、时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
+| 路径搜索 | `src/planner/path_plan/config/astar.json` |
+| 差速轨迹优化 | `src/planner/traj_opt/config/diff.json` |
+| 全局与局部规划、控制跟踪 | `src/planner/config/diff.json` |
 | ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
 | 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
 
@@ -136,13 +137,13 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 | 感知时间限制 | pose/scan 差不超过 0.01 秒；输入年龄不超过 0.20 秒 |
 | 到达判定 | 位置 0.10 米、朝向 0.10 rad，并确认停稳 |
 
-机器人尺寸统一由 `robot_model/config/robot.json` 读取，ROS 层和规划层不再单独配置半径。仿真共用同一机器人模型实例，独立使用规划器时也通过机器人模块创建默认模型；搜索和 ESDF 净距查询均使用 0.125 米。CircleModel 是实际不规则底盘的圆形包络，不能表达完全相同的非圆轮廓。系统 URDF 供 RViz 和 TF 使用，SDF 供物理仿真使用；两者的高度、脚轮形状和惯量不是逐项相同，本次尺寸核对按实际 SDF 的平面碰撞包络进行。
+机器人尺寸统一由 `src/robot_model/config/robot.json` 读取，ROS 层和规划层不再单独配置半径。仿真共用同一机器人模型实例，独立使用规划器时也通过机器人模块创建默认模型；搜索和 ESDF 净距查询均使用 0.125 米。CircleModel 是实际不规则底盘的圆形包络，不能表达完全相同的非圆轮廓。系统 URDF 供 RViz 和 TF 使用，SDF 供物理仿真使用；两者的高度、脚轮形状和惯量不是逐项相同，本次尺寸核对按实际 SDF 的平面碰撞包络进行。
 
 轮缘加速度参数的单位按插件中“关节角速度×轮半径”转换后的线速度更新逻辑核对，见 [GazeboRosDiffDrive](https://github.com/ros-simulation/gazebo_ros_pkgs/blob/ros2/gazebo_plugins/src/gazebo_ros_diff_drive.cpp)。
 
 ## 日志与验证
 
-`tools/log.hpp` 的 `LogConfig::level` 默认改为 `Debug`，包括 Release 构建。`LOGD`、`LOGI`、`LOGW`、`LOGE` 均可写入文件；`solver cost` 的 total、smoothness、time、obstacle、obstacle_soft 等项默认可见。文件在 `log_directory` 指定目录，启动脚本默认使用项目的 `log/`。`console` 仍默认关闭，日志文件级别与 ROS 控制台级别是两套设置。
+`src/tools/log.hpp` 的 `LogConfig::level` 默认改为 `Debug`，包括 Release 构建。`LOGD`、`LOGI`、`LOGW`、`LOGE` 均可写入文件；`solver cost` 的 total、smoothness、time、obstacle、obstacle_soft 等项默认可见。文件在 `log_directory` 指定目录，启动脚本默认使用项目的 `log/`。`console` 仍默认关闭，日志文件级别与 ROS 控制台级别是两套设置。
 
 此前在禁行半径 0.05 米、障碍权重 100000 时，通过初始、reset、滚动新增格的未知策略检查，一格禁行圈检查，以及 253 搜索阻挡 / ESDF 忽略、254 与 255 参与 ESDF 的检查。已重新运行无界面 Gazebo 闭环：通过 `/goal_pose` 发送 `(3.5,0,0)`，约 34 秒绕过中央障碍并报告 `goal_reached`，位置约 `(3.458,0.035)`，位置误差约 5.5 cm。该次最大命令线速度约 0.18 m/s，最大角速度约 0.708 rad/s；323 次局部规划成功，没有规划失败。再次发送目标后调用取消服务，已确认发布零速度。日志中已验证 `D/optimizer: solver cost` 输出。
 

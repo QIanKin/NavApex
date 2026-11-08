@@ -17,7 +17,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 get_filename_component(NAVAPEX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
-add_subdirectory("${NAVAPEX_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/navapex")
+add_subdirectory("${NAVAPEX_ROOT}/src" "${CMAKE_CURRENT_BINARY_DIR}/navapex")
 add_executable(navapex_node src/navapex_node.cpp)
 target_link_libraries(navapex_node planner::core planner::perception planner::log)
 ament_target_dependencies(navapex_node rclcpp nav_msgs sensor_msgs geometry_msgs std_msgs std_srvs
