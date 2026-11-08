@@ -114,22 +114,22 @@ bool Diff_Optimizer::initializePlanning()
     state_.min_swarm_dist_sq.resize(input.neighbors.size());
     state_.sample_points.resize(3, state_.piece_count * param_.integration_intervals + 1);
 
-    double clearance = 0;
-    // 检查起点终点是否位于障碍物内
-    Pose2D start{input.start.position.x(), input.start.position.y(), input.start.position.z()};
-    input.robot_->clearance(start, *input.esdf, clearance);
-    if (clearance < 0)
-    {
-        LOGW(OPTIMIZER_TAG) << "start in collision or outside esdf";
-        return false;
-    }
-    Pose2D goal{input.goal.position.x(), input.goal.position.y(), input.goal.position.z()};
-    input.robot_->clearance(goal, *input.esdf, clearance);
-    if (clearance < 0)
-    {
-        LOGW(OPTIMIZER_TAG) << "goal in collision or outside esdf";
-        return false;
-    }
+    // double clearance = 0;
+    // // 检查起点终点是否位于障碍物内
+    // Pose2D start{input.start.position.x(), input.start.position.y(), input.start.position.z()};
+    // input.robot_->clearance(start, *input.esdf, clearance);
+    // if (clearance < 0)
+    // {
+    //     LOGW(OPTIMIZER_TAG) << "start in collision or outside esdf";
+    //     return false;
+    // }
+    // Pose2D goal{input.goal.position.x(), input.goal.position.y(), input.goal.position.z()};
+    // input.robot_->clearance(goal, *input.esdf, clearance);
+    // if (clearance < 0)
+    // {
+    //     LOGW(OPTIMIZER_TAG) << "goal in collision or outside esdf";
+    //     return false;
+    // }
 
     // 1.1 生成初始轨迹
     minco_.reset(input.start.matrix(), input.goal.matrix(), state_.piece_count);
@@ -572,7 +572,7 @@ bool Diff_Optimizer::CheckTrajectory()
 int Diff_Optimizer::checkEnd() const
 {
     int last = state_.piece_count * param_.integration_intervals;
-    return state_.input->touches_goal ? last : last - (last - 1) / 3;
+    return state_.input->touches_goal ? last : last - (last - 1) / 2;
 }
 
 } // namespace navapex::traj_opt
