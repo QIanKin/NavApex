@@ -20,6 +20,10 @@ VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const Robo
     if (!plan.success || plan.goal_reached || plan.trajectory.getPieceNum() == 0)
         return result;
 
+    constexpr double max_velocity = 0.22;
+    constexpr double position_gain = 1.5;
+    constexpr double lateral_gain = 2.0;
+    constexpr double tracking_distance = 0.25;
     const auto &control = param_;
     auto current = toPose2D(state.pose);
     Eigen::Vector3d pose(current.x, current.y, current.yaw);
@@ -35,7 +39,7 @@ VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const Robo
     int end_piece = std::min(check_end / intervals, plan.trajectory.getPieceNum() - 1);
     double tracking_end = durations.head(end_piece).sum() + durations[end_piece] * (check_end - end_piece * intervals) / intervals;
     Eigen::Vector3d previous = plan.trajectory.getPos(0);
-    while (sample < tracking_end && distance < control.tracking_distance)
+    while (sample < tracking_end && distance < tracking_distance)
     {
         sample = std::min(sample + 0.05, tracking_end);
         Eigen::Vector3d point = plan.trajectory.getPos(sample);
@@ -49,16 +53,16 @@ VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const Robo
     double bearing = std::atan2(error.y(), error.x()) - pose.z();
     bearing = std::atan2(std::sin(bearing), std::cos(bearing));
     double v = std::min(param_.cruise_speed, std::max(0.0, forward) +
-        control.position_gain * std::max(0.0, c * error.x() + s * error.y()));
+        position_gain * std::max(0.0, c * error.x() + s * error.y()));
     v *= std::max(0.0, std::cos(bearing));
     if (touches_goal)
         v = std::min(v, std::sqrt(2 * control.max_acceleration * std::max(0.0, goal_distance - param_.position_tolerance / 2)));
-    double w = control.lateral_gain * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
+    double w = lateral_gain * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
     v = std::clamp(v, linear_velocity - control.max_acceleration * control.control_period,
                      linear_velocity + control.max_acceleration * control.control_period);
     w = std::clamp(w, angular_velocity - control.max_angular_acceleration * control.control_period,
                      angular_velocity + control.max_angular_acceleration * control.control_period);
-    result.velocity = std::clamp(v, 0.0, control.max_velocity);
+    result.velocity = std::clamp(v, 0.0, max_velocity);
     result.angular_velocity = std::clamp(w, -control.max_angular_velocity, control.max_angular_velocity);
     return result;
 }

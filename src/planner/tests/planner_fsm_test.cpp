@@ -230,7 +230,7 @@ void closedLoop()
             result.angular_velocity = command.angular_velocity;
         }
         require(result.success, "closed loop planning failed");
-        require(result.velocity >= 0 && result.velocity <= planner.param().max_velocity &&
+        require(result.velocity >= 0 && result.velocity <= 0.22 &&
                 std::abs(result.angular_velocity) <= planner.param().max_angular_velocity,
                 "closed loop command exceeded velocity limits");
         if (result.goal_reached)

@@ -21,16 +21,12 @@ public:
     double rotate_threshold = 1.05;
     double start_yaw_tolerance = 0.35;
 
-    // 控制与跟踪
+    // 旋转控制与运动限制
     double control_period = 0.1;
-    double max_velocity = 0.22;
     double max_angular_velocity = 1.0;
     double max_acceleration = 0.4;
     double max_angular_acceleration = 1.5;
-    double position_gain = 1.5;
-    double lateral_gain = 2;
     double heading_gain = 0.8;
-    double tracking_distance = 0.25;
 
     explicit PlannerParams(const std::string &path = {})
     {
@@ -62,14 +58,10 @@ public:
         {
             const auto &v = json.at("controller");
             control_period = v.value("period", control_period);
-            max_velocity = v.value("max_velocity", max_velocity);
             max_angular_velocity = v.value("max_angular_velocity", max_angular_velocity);
             max_acceleration = v.value("max_acceleration", max_acceleration);
             max_angular_acceleration = v.value("max_angular_acceleration", max_angular_acceleration);
-            position_gain = v.value("position_gain", position_gain);
-            lateral_gain = v.value("lateral_gain", lateral_gain);
             heading_gain = v.value("heading_gain", heading_gain);
-            tracking_distance = v.value("tracking_distance", tracking_distance);
         }
 
     }
