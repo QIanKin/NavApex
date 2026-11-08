@@ -116,14 +116,19 @@ GlobalPlanResult Planner::planGlobal(const GlobalPlanInput &input)
 
 double Planner::updateProgress(const Eigen::Vector2d &position)
 {
-    double best = std::numeric_limits<double>::infinity(), selected = progress_;
+    double best = std::numeric_limits<double>::infinity();
+    double selected = progress_;
     for (std::size_t i = 1; i < global_path_.size(); ++i)
     {
         if (path_lengths_[i] < progress_ || path_lengths_[i - 1] > progress_ + 2 * param_.lookahead_distance)
             continue;
-        Eigen::Vector2d a = global_path_[i - 1].head<2>(), edge = global_path_[i].head<2>() - a;
+        Eigen::Vector2d a = global_path_[i - 1].head<2>();
+        Eigen::Vector2d edge = global_path_[i].head<2>() - a;
         double length = edge.norm();
-        if (length < 1e-9) continue;
+        if (length < 1e-9) 
+            continue;
+        // q = a + u * edge
+        // u = (p - a) * edge / || edge ||^2
         double u = std::clamp((position - a).dot(edge) / edge.squaredNorm(), 0.0, 1.0);
         double distance = (position - a - u * edge).squaredNorm();
         if (distance < best)
@@ -240,7 +245,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         }
         else
         {
-            // 1. 更新地图距离场，沿全局路径选择空闲的前瞻点。
+            // 1. 更新esdf
             if (cached_map_ != input.map)
             {
                 esdf_ = std::make_shared<map::EsdfMap2D>(*input.map);
@@ -248,25 +253,8 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
             }
             double progress = updateProgress(pose.head<2>());
             double target_distance = std::min(path_lengths_.back(), progress + param_.lookahead_distance);
-            Eigen::Vector3d target = pose;
-            bool target_found = false;
-            while (target_distance >= progress)
-            {
-                target = pathPoint(target_distance);
-                target.z() = unwrap(pathYaw(target_distance, pose.z()), pose.z());
-                if (!input.map->occupied({target.x(), target.y(), 0}))
-                {
-                    target_found = true;
-                    break;
-                }
-                target_distance -= input.map->resolution();
-            }
-            if (!target_found)
-            {
-                discardWarmStart();
-                LOGW(PLANNER_TAG) << "local plan failed: no_free_lookahead";
-                return result;
-            }
+            Eigen::Vector3d target = pathPoint(target_distance);
+            target.z() = unwrap(pathYaw(target_distance, pose.z()), pose.z());
             auto &plan = *optimizer_input_;
             plan.touches_goal = target_distance >= path_lengths_.back() - 1e-6;
             // 每次起点完全使用外部实测状态；旧轨迹只提供中间点和时间初值。
