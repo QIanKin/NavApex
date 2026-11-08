@@ -1,7 +1,7 @@
 {
   "collision": {
     "clearance": 0.1,
-    "soft_clearance": 0.3,
+    "soft_clearance": 0.2,
     "soft_scale": 0.05
   },
   "integration_intervals": 12,
@@ -40,7 +40,7 @@
   "weights": {
     "feasibility": 10000.0,
     "obstacle": 100000.0,
-    "obstacle_soft": 5000.0,
+    "obstacle_soft": 3000.0,
     "smoothness": 1.0,
     "sqrvariance": 10000.0,
     "swarm": 10000.0,
