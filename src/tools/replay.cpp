@@ -133,6 +133,7 @@ void plan(Json fields, const planner::LocalPlanResult &result,
             fields["local_goal"] = {result.local_goal.x(), result.local_goal.y(), result.local_goal.z()};
             fields["trajectory"] = trajectory(result.trajectory);
             fields["initial_trajectory"] = trajectory(result.initial_trajectory);
+            fields["global_path_axes"] = {"x", "y", "z"};
             fields["global_path"] = Json::array();
             for (const auto &p : global_path) fields["global_path"].push_back({p.x(), p.y(), p.z()});
             return fields.dump();

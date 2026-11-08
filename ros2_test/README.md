@@ -39,7 +39,7 @@ Gazebo /scan → LaserScan2D + 对应时刻 RobotState → PerceptionInterface
                                          /cmd_vel → Gazebo
 ```
 
-`src/navapex_node.cpp` 负责 ROS 数据转换、调度和发布。`PerceptionInterface` 与 `Planner` 共用外部注入的机器人模型；感知结果中的地图指针直接交给规划器，没有 ROS costmap 中转，也没有重新复制一份用于规划的栅格。
+`src/navapex_node.cpp` 负责 ROS 数据转换、调度和发布。节点持有机器人模型，传给 `Planner`，并通过每帧 `PerceptionInput::robot` 交给感知处理器；两者共用同一模型。感知结果中的地图指针直接交给规划器，没有 ROS costmap 中转，也没有重新复制一份用于规划的栅格。
 
 `/odom` 使用 Gazebo 插件的 **WORLD 真值模式**（`odometry_source=1`），不是轮速积分。位姿处于世界坐标系，速度转换到车体坐标系；`map → odom` 为恒等变换。插件的实现见 [GazeboRosDiffDrive](https://github.com/ros-simulation/gazebo_ros_pkgs/blob/ros2/gazebo_plugins/src/gazebo_ros_diff_drive.cpp)。加速度由相邻真值速度差分估计，并补上差速转弯的向心分量。
 

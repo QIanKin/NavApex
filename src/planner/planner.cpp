@@ -1,5 +1,6 @@
 #include "planner.hpp"
-#include "planner/params/planner_params.hpp"
+#include "planner/path_plan/searcher_io.hpp"
+#include "robot_model/robot_state.hpp"
 
 #include <perception/esdf/esdf_map_2d.hpp>
 #include <algorithm>
@@ -36,6 +37,8 @@ bool lineFree(const perception::OccupancyMap &map, const Eigen::Vector3d &a, con
 }
 } // namespace
 
+
+
 Planner::Planner(std::shared_ptr<const robot_model::RobotModel> robot) 
                  : robot_(std::move(robot))
 {
@@ -46,20 +49,8 @@ Planner::Planner(std::shared_ptr<const robot_model::RobotModel> robot)
         searcher_ = std::make_unique<path_plan::SearcherInterface>("astar2d", search_input_);
         optimizer_input_ = std::make_shared<traj_opt::OptimizerInput>();
         optimizer_ = std::make_unique<traj_opt::OptimizerInterface>(param_.type, optimizer_input_);
+        optimizer_input_->robot_ = robot_;
     }
-}
-
-void Planner::reset()
-{
-    global_path_.clear();
-    path_lengths_.clear();
-    progress_ = 0;
-    previous_trajectory_ = {};
-    force_search_ = false;
-    phase_ = resume_phase_ = MotionPhase::NewPath;
-    rotation_ready_ = false;
-    alignment_yaw_ = 0;
-    stopped_since_ = -1;
 }
 
 void Planner::discardWarmStart()
@@ -68,45 +59,59 @@ void Planner::discardWarmStart()
     force_search_ = true;
 }
 
-const PlannerParams &Planner::param() const { return param_; }
-const std::vector<Eigen::Vector3d> &Planner::globalPath() const { return global_path_; }
+const PlannerParams &Planner::param() const
+{ 
+    return param_; 
+}
+
+const std::vector<Eigen::Vector3d> &Planner::globalPath() const 
+{ 
+    return global_path_;
+}
+
+void Planner::reset()
+{
+    phase_ = MotionPhase::NewPath;
+    global_path_.clear();
+    path_lengths_.clear();
+    previous_trajectory_ = {};
+    force_search_   = false;
+    rotation_ready_ = false;
+    alignment_yaw_  = 0;
+    stopped_since_  = -1;
+    progress_ = 0;
+}
 
 GlobalPlanResult Planner::planGlobal(const GlobalPlanInput &input)
 {
     auto begin = std::chrono::steady_clock::now();
-    Eigen::Vector3d start(input.start.x, input.start.y, input.start.yaw);
-    Eigen::Vector3d goal(input.goal.x, input.goal.y, input.goal.yaw);
     reset();
+
     GlobalPlanResult result;
-    if (!std::isfinite(start.z()) || !std::isfinite(goal.z()))
+    search_input_->start = toPosition3D(input.start);
+    search_input_->goal  = toPosition3D(input.goal);
+    search_input_->map   = input.map; 
+    search_input_->radius = robot_->radius();
+    auto search_result = searcher_->search();
+    if (!search_result.success)
     {
-        LOGW(PLANNER_TAG) << "global plan failed reason=invalid_input elapsed_ms=" << elapsedMs(begin);
+        LOGW(PLANNER_TAG) << "global search failed, elapsed_ms=" << elapsedMs(begin);
         return result;
     }
-    *search_input_ = {{start.x(), start.y(), 0}, {goal.x(), goal.y(), 0}, input.map, robot_->radius()};
-    auto search = searcher_->search();
-    if (!search.success)
-    {
-        LOGW(PLANNER_TAG) << "global plan failed reason=global_search_failed elapsed_ms=" << elapsedMs(begin);
-        return result;
-    }
-    global_path_ = std::move(search.path);
-    goal_ = goal;
+
+    global_path_ = std::move(search_result.path);
+    goal_ = Eigen::Vector3d(input.goal.x,input.goal.y,input.goal.yaw);
     path_lengths_.resize(global_path_.size());
     path_lengths_[0] = 0;
     for (std::size_t i = 1; i < global_path_.size(); ++i)
-        path_lengths_[i] = path_lengths_[i - 1] + (global_path_[i] - global_path_[i - 1]).head<2>().norm();
-    double yaw = start.z();
-    for (std::size_t i = 0; i < global_path_.size(); ++i)
     {
-        if (path_lengths_.back() > 1e-9)
-            yaw = unwrap(pathYaw(path_lengths_[i]), yaw);
-        global_path_[i].z() = yaw;
+        path_lengths_[i] = path_lengths_[i - 1] + (global_path_[i] - global_path_[i - 1]).head<2>().norm();
     }
+
     result.path = global_path_;
     result.success = true;
     LOGI(PLANNER_TAG) << "global path points=" << result.path.size() << " length=" << path_lengths_.back()
-                    << " elapsed_ms=" << elapsedMs(begin);
+                      << " elapsed_ms=" << elapsedMs(begin);
     return result;
 }
 
@@ -140,17 +145,15 @@ Eigen::Vector3d Planner::pathPoint(double distance) const
     std::size_t i = std::max<std::size_t>(1, next - path_lengths_.begin());
     double length = path_lengths_[i] - path_lengths_[i - 1];
     double u = length > 1e-9 ? (distance - path_lengths_[i - 1]) / length : 0;
-    Eigen::Vector3d point = global_path_[i - 1] + u * (global_path_[i] - global_path_[i - 1]);
-    point.z() = global_path_[i - 1].z();
-    return point;
+    return global_path_[i - 1] + u * (global_path_[i] - global_path_[i - 1]);
 }
 
-double Planner::pathYaw(double distance) const
+double Planner::pathYaw(double distance, double fallback_yaw) const
 {
     double window = param_.waypoint_spacing;
     double lower = std::max(0.0, std::min(distance - window / 2, path_lengths_.back() - window));
     Eigen::Vector2d delta = (pathPoint(std::min(path_lengths_.back(), lower + window)) - pathPoint(lower)).head<2>();
-    return delta.norm() > 1e-9 ? std::atan2(delta.y(), delta.x()) : pathPoint(distance).z();
+    return delta.norm() > 1e-9 ? std::atan2(delta.y(), delta.x()) : fallback_yaw;
 }
 
 LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
@@ -162,9 +165,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     LocalPlanResult result;
     auto fail = [&](const char *reason)
     {
-        if (phase_ != MotionPhase::Stuck)
-            resume_phase_ = phase_;
-        phase_ = MotionPhase::Stuck;
         stopped_since_ = -1;
         discardWarmStart();
         LOGW(PLANNER_TAG) << "local plan failed reason=" << reason << " seed=" << initial_source
@@ -184,9 +184,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         !std::isfinite(angular_velocity) || !std::isfinite(linear_acceleration.x) || !std::isfinite(linear_acceleration.y) ||
         !std::isfinite(angular_acceleration) || !std::isfinite(state.stamp))
         return fail("invalid_input");
-
-    if (phase_ == MotionPhase::Stuck)
-        phase_ = resume_phase_;
 
     auto command = [&](double v, double w, const char *status, bool pure_rotation = false)
     {
@@ -229,11 +226,11 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     double progress = updateProgress(pose.head<2>());
     if (phase_ == MotionPhase::NewPath)
     {
-        alignment_yaw_ = pathYaw(std::min(path_lengths_.back(), progress + param_.waypoint_spacing / 2));
-        phase_ = std::abs(wrap(alignment_yaw_ - pose.z())) > param_.rotate_threshold ?
+        // 起步对齐使用本帧实测位姿，不使用全局搜索时的起点朝向。
+        alignment_yaw_ = pathYaw(std::min(path_lengths_.back(), progress + param_.waypoint_spacing / 2),
+                                 planar_pose.yaw);
+        phase_ = std::abs(wrap(alignment_yaw_ - planar_pose.yaw)) > param_.rotate_threshold ?
             MotionPhase::StartRotating : MotionPhase::Navigating;
-        rotation_ready_ = false;
-        stopped_since_ = -1;
     }
     if ((phase_ == MotionPhase::Navigating || phase_ == MotionPhase::StartRotating) &&
         goal_distance <= param_.position_tolerance)
@@ -313,7 +310,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     while (target_distance >= progress)
     {
         target = pathPoint(target_distance);
-        target.z() = unwrap(pathYaw(target_distance), pose.z());
+        target.z() = unwrap(pathYaw(target_distance, pose.z()), pose.z());
         if (!input.map->occupied({target.x(), target.y(), 0}))
         {
             target_found = true;
@@ -322,8 +319,8 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         target_distance -= input.map->resolution();
     }
     if (!target_found) return fail("no_free_lookahead");
-    bool final = target_distance >= path_lengths_.back() - 1e-6;
     auto &plan = *optimizer_input_;
+    plan.touches_goal = target_distance >= path_lengths_.back() - 1e-6;
     // 每次起点完全使用外部实测状态；旧轨迹只提供中间点和时间初值。
     plan.start.position = pose;
     plan.start.velocity << linear_velocity * std::cos(pose.z()), linear_velocity * std::sin(pose.z()), angular_velocity;
@@ -332,7 +329,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                                linear_acceleration.x * std::sin(pose.z()) + linear_acceleration.y * std::cos(pose.z()), angular_acceleration;
     plan.map = input.map;
     plan.esdf = esdf_;
-    plan.robot_ = robot_;
     plan.start_time = state.stamp;
     plan.goal.position = target;
 
@@ -386,7 +382,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     bool searched = false;
     auto searchSeed = [&]()
     {
-        if (searched) return false;
         searched = true;
         *search_input_ = {{pose.x(), pose.y(), 0}, {target.x(), target.y(), 0}, input.map, 0};
         auto route = searcher_->search();
@@ -414,7 +409,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                 return previous_trajectory_.getPos(passed + t);
             double distance = std::min(target_distance, previous_target_distance_ + (t - remaining) * param_.cruise_speed);
             Eigen::Vector3d point = pathPoint(distance);
-            point.z() = pathYaw(distance);
+            point.z() = pathYaw(distance, pose.z());
             return point;
         };
         double yaw = pose.z();
@@ -441,25 +436,23 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         if (!geometricSeed(global_slice)) return fail("empty_global_slice");
     }
 
-    bool optimized_success = false;
     // 一次常规优化（内部最多三次）；失败后只搜索一次，再调用一次优化器。
     for (int attempt = 0; attempt < 2; ++attempt)
     {
         plan.goal.velocity.setZero();
         plan.goal.acceleration.setZero();
-        if (!final)
+        if (!plan.touches_goal)
             plan.goal.velocity << param_.cruise_speed * std::cos(plan.goal.position.z()),
                                   param_.cruise_speed * std::sin(plan.goal.position.z()), 0;
-        plan.touches_goal = final;
         poly_traj::MinJerkOpt<3> seed;
         seed.reset(plan.start.matrix(), plan.goal.matrix(), plan.durations.size());
         seed.generate(plan.inner_points, plan.durations);
         result.initial_trajectory = seed.getTraj();
         auto optimized = optimizer_->optimize();
-        if (optimized.success)
+        result.success = optimized.success;
+        if (result.success)
         {
-            result.trajectory = optimized.trajectory;
-            optimized_success = true;
+            result.trajectory = std::move(optimized.trajectory);
             break;
         }
         reset_reason = "optimization_failed";
@@ -467,7 +460,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         if (searched) break;
         if (!searchSeed()) return fail("local_search_failed");
     }
-    if (!optimized_success) return fail("local_optimization_failed");
+    if (!result.success) return fail("local_optimization_failed");
     result.local_goal = plan.goal.position;
     previous_trajectory_ = result.trajectory;
     previous_start_time_ = state.stamp;
@@ -496,7 +489,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     double v = std::min(param_.cruise_speed, std::max(0.0, forward) +
         control.position_gain * std::max(0.0, c * error.x() + s * error.y()));
     v *= std::max(0.0, std::cos(bearing));
-    if (final)
+    if (plan.touches_goal)
         v = std::min(v, std::sqrt(2 * control.max_acceleration * std::max(0.0, goal_distance - param_.position_tolerance / 2)));
     double w = control.lateral_gain * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
     return command(v, w, "navigating");

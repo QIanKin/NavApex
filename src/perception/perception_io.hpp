@@ -1,6 +1,7 @@
 #pragma once
 
 #include <perception/maps/base_map.hpp>
+#include <robot_model/robot_model.hpp>
 #include <robot_model/robot_state.hpp>
 #include <limits>
 #include <memory>
@@ -39,6 +40,7 @@ struct PerceptionInput
     RobotState state;
     SensorFrame sensor;
     double now = std::numeric_limits<double>::quiet_NaN();
+    std::shared_ptr<const robot_model::RobotModel> robot;
 };
 
 struct PerceptionResult

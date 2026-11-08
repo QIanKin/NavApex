@@ -70,6 +70,8 @@ HH:MM:SS mmm(pid)I/replay: epoch_ns=… seq=… channel=replay … | {JSON}
 
 栅格布局为 `index = y * width + x`，原点是左下角，分辨率单位米；0 空闲、1～252 代价、253 禁行、254 实体障碍、255 未知。直接保存原始栅格，不经过 ROS 的 -1/0～100 显示编码。
 
+全局路径 `global_path` 只保存几何位置，`global_path_axes=[x,y,z]`，二维规划中 z 为 0；任务终点 yaw 保存在 `goal` 中。旧日志没有 `global_path_axes` 时，第三项可能为 yaw；播放器仅使用全局路径的 x、y 绘制折线。
+
 每条差速轨迹显式声明 `axes=[x,y,yaw]`。每段包含 duration 和 3×6 系数，降幂排列，使用该段局部秒数计算。GUI 对连续多项式采样显示，原始系数保留在日志中。泛用 `LOG_TRAJECTORY` 生产端分别标识差速 `x,y,yaw` 和三维 `x,y,z`。
 
 地图压缩和大轨迹 JSON 编码在现有 g3log sink 线程执行。调用线程只捕获不可变地图和轨迹快照；日志队列维持数量及内存预算，超过预算计入 dropped。后台日志故障不抛入规划求解。

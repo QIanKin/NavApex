@@ -10,8 +10,8 @@
 namespace navapex::perception
 {
 
-Lidar2DProcessor::Lidar2DProcessor(Lidar2DParams param, std::shared_ptr<const robot_model::RobotModel> robot)
-                                  : param_(std::move(param)), robot_(std::move(robot))
+Lidar2DProcessor::Lidar2DProcessor(Lidar2DParams param)
+                                  : param_(std::move(param))
 {
     reset();
 }
@@ -242,7 +242,7 @@ PerceptionResult Lidar2DProcessor::update(const PerceptionInput &input)
         double s = std::sin(angle);
         double ray_range = no_return ? scan.range_max : range;
         Position2D base_endpoint = transformPoint(param_.base_from_laser, {ray_range * c, ray_range * s});
-        if (!no_return && robot_->contains(base_endpoint, param_.self_filter_padding))  // 清除打到自身的回波
+        if (!no_return && input.robot->contains(base_endpoint, param_.self_filter_padding))  // 清除打到自身的回波
         {
             continue;
         }

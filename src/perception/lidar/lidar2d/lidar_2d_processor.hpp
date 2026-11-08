@@ -3,7 +3,6 @@
 #include <perception/lidar/base_lidar_processor.hpp>
 #include <perception/params/lidar_2d_params.hpp>
 #include <perception/maps/grid_map_2d.hpp>
-#include <robot_model/robot_model.hpp>
 
 namespace navapex::perception
 {
@@ -12,7 +11,7 @@ class Lidar2DProcessor final : public LidarProcessor
 {
 
 public:
-    Lidar2DProcessor(Lidar2DParams param, std::shared_ptr<const robot_model::RobotModel> robot);
+    explicit Lidar2DProcessor(Lidar2DParams param);
     
     PerceptionResult update(const PerceptionInput &input) override;
     
@@ -34,7 +33,6 @@ private:
     std::vector<std::uint8_t> inflatedCosts() const;
 
     Lidar2DParams param_;
-    std::shared_ptr<const robot_model::RobotModel> robot_;
     Position2D origin_;
     std::vector<std::uint8_t> raw_;
     

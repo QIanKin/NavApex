@@ -18,7 +18,6 @@ public:
     const SearcherParams &param() const;
 
 private:
-    std::string type_;
     std::shared_ptr<const SearchInput> input_;
     std::unique_ptr<Searcher> searcher_;
 };

@@ -19,6 +19,7 @@ struct GlobalPlanInput
 struct GlobalPlanResult
 {
     bool success = false;
+    // 几何位置 (x, y, z)，二维规划中 z = 0；终点 yaw 来自 GlobalPlanInput::goal。
     std::vector<Eigen::Vector3d> path;
 };
 

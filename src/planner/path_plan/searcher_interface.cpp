@@ -7,7 +7,7 @@
 namespace navapex::path_plan
 {
 SearcherInterface::SearcherInterface(const std::string &type,
-                                     std::shared_ptr<const SearchInput> input) : type_(type), input_(std::move(input))
+                                     std::shared_ptr<const SearchInput> input) : input_(std::move(input))
 {
     auto path = std::filesystem::path(__FILE__).parent_path() / "config" / "astar.json";
     if(type == "astar3d"){

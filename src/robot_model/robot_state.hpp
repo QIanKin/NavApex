@@ -72,6 +72,16 @@ inline Position2D toPosition2D(const Pose3D &pose)
     return {pose.position.x, pose.position.y};
 }
 
+inline Position3D toPosition3D(const Pose2D &pose)
+{
+    return {pose.x, pose.y, 0};
+}
+
+inline Position3D toPosition3D(const Pose3D &pose)
+{
+    return {pose.position.x, pose.position.y, pose.position.z};
+}
+
 inline Pose2D toPose2D(const Pose3D &pose)
 {
     const auto &p = pose.position;

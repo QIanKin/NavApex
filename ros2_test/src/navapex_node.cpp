@@ -56,12 +56,12 @@ public:
         logging.max_file_bytes = static_cast<std::size_t>(log_mb) * 1024 * 1024;
         logging.max_files = static_cast<std::size_t>(log_files);
         planner_tools::initLog(logging);
-        auto robot = robot_model::RobotModel::create();
-        planner_ = std::make_unique<planner::Planner>(robot);
-        perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d", robot);
+        robot_ = robot_model::RobotModel::create();
+        planner_ = std::make_unique<planner::Planner>(robot_);
+        perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d");
         const auto &lidar = dynamic_cast<const perception::Lidar2DParams &>(perception_->param());
         planner_tools::setReplayMetadata(nlohmann::json({{"v", 1}, {"frame", frame_},
-            {"robot", {{"shape", robot->type()}, {"radius", robot->radius()}}},
+            {"robot", {{"shape", robot_->type()}, {"radius", robot_->radius()}}},
             {"planner_type", planner_->param().type}, {"source_clock", "ros"},
             {"trajectory_axes", {"x", "y", "yaw"}},
             {"perception", {{"resolution", lidar.resolution}, {"width", lidar.width}, {"height", lidar.height},
@@ -195,6 +195,24 @@ private:
         message.header.frame_id = frame_;
         message.header.stamp = now();
         for (const auto &pose : poses) message.poses.push_back(poseMessage(pose));
+        return message;
+    }
+
+    nav_msgs::msg::Path globalPathMessage(const std::vector<Eigen::Vector3d> &positions) const
+    {
+        nav_msgs::msg::Path message;
+        message.header.frame_id = frame_;
+        message.header.stamp = now();
+        for (const auto &position : positions)
+        {
+            geometry_msgs::msg::PoseStamped pose;
+            pose.header = message.header;
+            pose.pose.position.x = position.x();
+            pose.pose.position.y = position.y();
+            pose.pose.position.z = position.z();
+            pose.pose.orientation.w = 1;
+            message.poses.push_back(pose);
+        }
         return message;
     }
 
@@ -335,6 +353,7 @@ private:
         input.state = nearest->state;
         input.sensor = scan;
         input.now = time;
+        input.robot = robot_;
         auto result = perception_->update(input);
         auto scan_id = ++scan_id_;
         if (!result.success)
@@ -493,7 +512,7 @@ private:
                         recordPlan(snapshot, {}, "discarded_goal_changed", false);
                         continue;
                     }
-                    global_pub_->publish(pathMessage(global.path));
+                    global_pub_->publish(globalPathMessage(global.path));
                     if (!global.success)
                     {
                         failed_global = snapshot.global;
@@ -523,6 +542,7 @@ private:
     double input_timeout_, map_timeout_, command_timeout_;
     tf2_ros::Buffer tf_;
     tf2_ros::TransformListener listener_;
+    std::shared_ptr<const robot_model::RobotModel> robot_;
     std::unique_ptr<planner::Planner> planner_;
     std::unique_ptr<perception::PerceptionInterface> perception_;
     std::deque<RecordedState> state_history_;
