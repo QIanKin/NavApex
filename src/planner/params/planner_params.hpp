@@ -10,6 +10,8 @@ namespace navapex::planner
 class PlannerParams
 {
 public:
+    std::string type = "diff";
+
     // 局部规划
     double lookahead_distance = 1.2;
     double waypoint_spacing = 0.4;
@@ -48,6 +50,7 @@ public:
     void read()
     {
         const auto &json = json_;
+        type = json.value("type", type);
         if (json.contains("local"))
         {
             const auto &v = json.at("local");

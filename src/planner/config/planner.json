@@ -1,4 +1,5 @@
 {
+  "type": "diff",
   "local": {
     "lookahead_distance": 1.2,
     "waypoint_spacing": 0.4,

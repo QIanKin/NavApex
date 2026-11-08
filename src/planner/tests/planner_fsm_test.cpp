@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 using namespace navapex;
 using planner::LocalPlanInput;
@@ -55,9 +56,51 @@ LocalPlanResult tick(Planner &planner, LocalPlanInput &input, double dt = 0.1)
     return planner.planLocal(input);
 }
 
+void reusableSearcher()
+{
+    auto input = std::make_shared<path_plan::SearchInput>();
+    path_plan::SearcherInterface searcher("astar2d", input);
+    auto check = [&]()
+    {
+        auto result = searcher.search();
+        require(result.success && !result.path.empty(), "reused searcher must find a path");
+        Eigen::Vector3d start(input->start.x, input->start.y, input->start.z);
+        Eigen::Vector3d goal(input->goal.x, input->goal.y, input->goal.z);
+        require((result.path.front() - start).norm() < 1e-9 &&
+                (result.path.back() - goal).norm() < 1e-9,
+                "reused searcher must use the updated endpoints");
+    };
+    auto original = makeMap();
+    *input = {{0, 0, 0}, {2, 0, 0}, original, 0.125};
+    check();
+
+    auto shifted = std::make_shared<perception::GridMap2D>(
+        perception::GridGeometry2D{0.2, 20, 12, 4, -2},
+        std::vector<std::uint8_t>(240, perception::Free));
+    *input = {{4.5, -1.5, 0}, {6.5, -0.5, 0}, shifted, 0};
+    check();
+
+    std::vector<std::uint8_t> costs(60, perception::Lethal);
+    for (int x = 0; x < 20; ++x) costs[20 + x] = perception::Free;
+    auto corridor = std::make_shared<perception::GridMap2D>(
+        perception::GridGeometry2D{0.1, 20, 3, 0, 0}, std::move(costs));
+    *input = {{0.15, 0.15, 0}, {1.85, 0.15, 0}, corridor, 0};
+    check();
+    input->radius = 0.125;
+    require(!searcher.search().success, "updated radius must reject the narrow corridor");
+    input->radius = 0;
+    check();
+    input->map.reset();
+    require(!searcher.search().success, "reused searcher must reject a null map");
+
+    *input = {{2, 1, 0}, {-1, -1, 0}, original, 0.125};
+    check();
+}
+
 void startAlignment()
 {
-    Planner planner("diff");
+    Planner planner(robot_model::RobotModel::create());
+    require(planner.param().type == "diff", "planner must load its type from planner.json");
     auto input = inputAt(0, pi / 2);
     plan(planner, input);
     input.state.twist.linear.x = 0.18;
@@ -100,7 +143,7 @@ void startAlignment()
 
 void goalAlignment()
 {
-    Planner planner("diff");
+    Planner planner(robot_model::RobotModel::create());
     auto input = inputAt(2, 0.3);
     plan(planner, input);
     tick(planner, input);
@@ -145,7 +188,7 @@ void goalAlignment()
 
 void failureRecovery()
 {
-    Planner planner("diff");
+    Planner planner(robot_model::RobotModel::create());
     auto input = inputAt(0, pi / 2);
     plan(planner, input);
     tick(planner, input);
@@ -175,11 +218,17 @@ void failureRecovery()
     input.map = free;
     result = tick(planner, input);
     require(result.success && result.trajectory.getPieceNum() > 0, "navigation must retry after obstacles clear");
+
+    plan(planner, input);
+    planner.discardWarmStart();
+    result = tick(planner, input);
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "global replanning and forced local search must reuse the same searcher");
 }
 
 void closedLoop()
 {
-    Planner planner("diff");
+    Planner planner(robot_model::RobotModel::create());
     auto input = inputAt(0, pi / 2);
     plan(planner, input, -pi / 2);
     for (int i = 0; i < 700; ++i)
@@ -216,6 +265,7 @@ void closedLoop()
 
 int main()
 {
+    reusableSearcher();
     startAlignment();
     goalAlignment();
     failureRecovery();

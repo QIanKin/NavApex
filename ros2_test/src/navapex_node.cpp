@@ -50,7 +50,7 @@ public:
         logging.replay = false;
         planner_tools::initLog(logging);
         auto robot = robot_model::RobotModel::create();
-        planner_ = std::make_unique<planner::Planner>("diff", robot);
+        planner_ = std::make_unique<planner::Planner>(robot);
         perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d", robot);
         auto map_qos = rclcpp::QoS(1).reliable().transient_local();
         map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/map", map_qos);

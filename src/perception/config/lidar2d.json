@@ -1,6 +1,6 @@
 {
   "grid": {
-    "resolution": 0.05,
+    "resolution": 0.02,
     "width": 160,
     "height": 160,
     "track_unknown_space": false

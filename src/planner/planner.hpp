@@ -10,13 +10,18 @@ namespace navapex::planner
 class Planner
 {
 public:
-    explicit Planner(const std::string &type, std::shared_ptr<const robot_model::RobotModel> robot = {});
+    explicit Planner(std::shared_ptr<const robot_model::RobotModel> robot);
 
     GlobalPlanResult planGlobal(const GlobalPlanInput &input);
+    
     LocalPlanResult planLocal(const LocalPlanInput &input);
+    
     const std::vector<Eigen::Vector3d> &globalPath() const;
+    
     const PlannerParams &param() const;
+    
     void reset();
+    
     void discardWarmStart();
 
 private:
@@ -35,8 +40,8 @@ private:
     double pathYaw(double distance) const;
 
     PlannerParams param_;
-    std::shared_ptr<path_plan::SearchInput> global_input_, local_input_;
-    std::unique_ptr<path_plan::SearcherInterface> global_searcher_, local_searcher_;
+    std::shared_ptr<path_plan::SearchInput> search_input_;
+    std::unique_ptr<path_plan::SearcherInterface> searcher_;
     std::shared_ptr<traj_opt::OptimizerInput> optimizer_input_;
     std::unique_ptr<traj_opt::OptimizerInterface> optimizer_;
     std::shared_ptr<const robot_model::RobotModel> robot_;

@@ -28,8 +28,13 @@ ctest --test-dir build --output-on-failure
 - `src/perception/config/lidar2d.json`：感知与局部地图参数。
 - `src/planner/path_plan/config/astar.json`：路径搜索参数。
 - `src/planner/traj_opt/config/`：轨迹优化参数。
-- `src/planner/config/diff.json`：规划与控制参数。
+- `src/planner/config/planner.json`：规划模式 `type` 与规划、控制参数。
 - `ros2_test/config/navapex.yaml`：ROS 接入与仿真参数。
 - `ros2_test/config/global_map.json`：仿真全局地图参数，独立于感知配置。
+
+`Planner(robot)` 固定读取 `src/planner/config/planner.json`，将 `type` 保存到 `PlannerParams::type`。
+当前支持 `"type": "diff"`，选择 `astar2d` 搜索和 `diff` 优化器；调用方不再传入类型。
+全局和局部规划复用同一个搜索器，每次搜索前更新同一份 `SearchInput` 的起点、终点、地图和半径。
+内层算法参数仍由搜索器和优化器读取各自模块的配置。
 
 核心模块自行读取本模块源目录的配置，不支持外部配置路径注入。修改核心 JSON 后重启生效；仿真通过 `./ros2_test/run.sh` 更新地图和 ROS 配置后启动。

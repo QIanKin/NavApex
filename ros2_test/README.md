@@ -49,7 +49,7 @@ Gazebo /scan → LaserScan2D + 对应时刻 RobotState → PerceptionInterface
 
 全局地图由 `scripts/generate_map.py` 从同一个 `worlds/navapex.world` 的静态 box 碰撞几何生成，分辨率取 `ros2_test/config/global_map.json`（当前 0.05 米），范围 `[-4,6] × [-4,4]`。JSON 的 `costs` 从左下角逐行排列，空闲为 0，实体障碍为 254；从全局地图自身配置读取 `forbidden_radius`；当前为 `0.0`，不生成 253 禁行区。启用后只在原始致命格外围生成禁行区，不递归膨胀。当前生成器面向这个平面、静态 box 场景；更换世界边界、几何类型或增加动态物体时需要相应扩展，动态障碍仍由雷达感知。
 
-全局 A* 使用地图和机器人半径检查通行；局部 A* 仍是点搜索。两者都通过 `occupied()` 拒绝 253、254、255。局部规划收到感知地图后才生成并缓存 ESDF：只有 254、255 和地图外边框作为距离场障碍，253 与衰减代价均不作为种子，机器人模型再减去自身半径得到净距。禁行圈只影响搜索，不重复加到优化器的机器人半径上。
+全局和局部规划复用同一个 A* 搜索器，每次通过更新 `SearchInput` 切换起点、终点、地图和半径。全局搜索传入机器人半径，局部搜索传入 0，保持点搜索行为；均通过 `occupied()` 拒绝 253、254、255。局部规划收到感知地图后才生成并缓存 ESDF：只有 254、255 和地图外边框作为距离场障碍，253 与衰减代价均不作为种子，机器人模型再减去自身半径得到净距。禁行圈只影响搜索，不重复加到优化器的机器人半径上。
 
 ## costmap 可视化
 
@@ -100,9 +100,11 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 | 感知外参、时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
 | 路径搜索 | `src/planner/path_plan/config/astar.json` |
 | 差速轨迹优化 | `src/planner/traj_opt/config/diff.json` |
-| 全局与局部规划、控制跟踪 | `src/planner/config/diff.json` |
+| 规划模式、全局与局部规划、控制跟踪 | `src/planner/config/planner.json` |
 | ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
 | 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
+
+ROS 层通过 `Planner(robot)` 创建规划器。规划器固定读取 `planner.json`，由其中的 `type` 统一选择内层搜索器和优化器；当前 `diff` 对应 `astar2d` 搜索与 `diff` 优化器。
 
 `ros2_test` 不保存核心参数副本。全局地图保留从 world 静态碰撞几何生成的流程，独立读取 `ros2_test/config/global_map.json`，不读取感知配置。核心模块直接读取源目录中的配置文件，修改 JSON 后重启即可生效；重新执行启动脚本会在全局地图配置或 world 改动时重新生成全局地图。修改 ROS YAML 后也通过启动脚本重新安装。
 

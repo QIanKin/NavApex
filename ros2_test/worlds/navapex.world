@@ -35,12 +35,16 @@
     <model name="north_wall"><static>true</static><pose>1 4 0.5 0 0 0</pose><link name="wall">
       <collision name="wall"><geometry><box><size>10 0.1 1</size></box></geometry></collision>
       <visual name="wall"><geometry><box><size>10 0.1 1</size></box></geometry></visual></link></model>
-    <model name="center_obstacle"><static>true</static><pose>1.6 0 0.5 0 0 0</pose><link name="obstacle">
-      <collision name="obstacle"><geometry><box><size>0.6 1.8 1</size></box></geometry></collision>
-      <visual name="obstacle"><geometry><box><size>0.6 1.8 1</size></box></geometry>
+    <!-- Straight channel: x=[0.75, 2.75], inner faces y=+/-0.175.
+         Clear width 0.35 m = robot diameter 0.25 m + 0.05 m on each side.
+         Side blocks meet the room walls so the robot cannot bypass the channel. -->
+    <model name="channel_left_wall"><static>true</static><pose>1.75 2.0875 0.5 0 0 0</pose><link name="wall">
+      <collision name="wall"><geometry><box><size>2 3.825 1</size></box></geometry></collision>
+      <visual name="wall"><geometry><box><size>2 3.825 1</size></box></geometry>
         <material><ambient>0.8 0.25 0.15 1</ambient><diffuse>0.8 0.25 0.15 1</diffuse></material></visual></link></model>
-    <model name="side_obstacle"><static>true</static><pose>3 -2 0.5 0 0 0</pose><link name="obstacle">
-      <collision name="obstacle"><geometry><box><size>1.5 0.6 1</size></box></geometry></collision>
-      <visual name="obstacle"><geometry><box><size>1.5 0.6 1</size></box></geometry></visual></link></model>
+    <model name="channel_right_wall"><static>true</static><pose>1.75 -2.0875 0.5 0 0 0</pose><link name="wall">
+      <collision name="wall"><geometry><box><size>2 3.825 1</size></box></geometry></collision>
+      <visual name="wall"><geometry><box><size>2 3.825 1</size></box></geometry>
+        <material><ambient>0.8 0.25 0.15 1</ambient><diffuse>0.8 0.25 0.15 1</diffuse></material></visual></link></model>
   </world>
 </sdf>

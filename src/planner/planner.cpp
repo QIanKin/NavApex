@@ -1,4 +1,5 @@
 #include "planner.hpp"
+#include "planner/params/planner_params.hpp"
 
 #include <perception/esdf/esdf_map_2d.hpp>
 #include <algorithm>
@@ -6,6 +7,7 @@
 #include <cmath>
 #include <filesystem>
 #include <tools/log.hpp>
+#include <utility>
 
 namespace navapex::planner
 {
@@ -34,18 +36,17 @@ bool lineFree(const perception::OccupancyMap &map, const Eigen::Vector3d &a, con
 }
 } // namespace
 
-Planner::Planner(const std::string &type, std::shared_ptr<const robot_model::RobotModel> robot)
-    : param_((std::filesystem::path(__FILE__).parent_path() / "config" / (type + ".json")).string())
+Planner::Planner(std::shared_ptr<const robot_model::RobotModel> robot) 
+                 : robot_(std::move(robot))
 {
-    if (type != "diff")
-        throw std::invalid_argument("Unknown planner type: " + type);
-    global_input_ = std::make_shared<path_plan::SearchInput>();
-    local_input_ = std::make_shared<path_plan::SearchInput>();
-    global_searcher_ = std::make_unique<path_plan::SearcherInterface>("astar2d", global_input_);
-    local_searcher_ = std::make_unique<path_plan::SearcherInterface>("astar2d", local_input_);
-    optimizer_input_ = std::make_shared<traj_opt::OptimizerInput>();
-    optimizer_ = std::make_unique<traj_opt::OptimizerInterface>(type, optimizer_input_);
-    robot_ = robot ? std::move(robot) : robot_model::RobotModel::create();
+    auto path = std::filesystem::path(__FILE__).parent_path() / "config" / "planner.json";
+    param_ = PlannerParams(path.string());
+    if (param_.type == "diff") {
+        search_input_ = std::make_shared<path_plan::SearchInput>();
+        searcher_ = std::make_unique<path_plan::SearcherInterface>("astar2d", search_input_);
+        optimizer_input_ = std::make_shared<traj_opt::OptimizerInput>();
+        optimizer_ = std::make_unique<traj_opt::OptimizerInterface>(param_.type, optimizer_input_);
+    }
 }
 
 void Planner::reset()
@@ -82,11 +83,8 @@ GlobalPlanResult Planner::planGlobal(const GlobalPlanInput &input)
         LOGW(PLANNER_TAG) << "global plan failed reason=invalid_input elapsed_ms=" << elapsedMs(begin);
         return result;
     }
-    global_input_->map = input.map;
-    global_input_->start = {start.x(), start.y(), 0};
-    global_input_->goal = {goal.x(), goal.y(), 0};
-    global_input_->radius = robot_->radius();
-    auto search = global_searcher_->search();
+    *search_input_ = {{start.x(), start.y(), 0}, {goal.x(), goal.y(), 0}, input.map, robot_->radius()};
+    auto search = searcher_->search();
     if (!search.success)
     {
         LOGW(PLANNER_TAG) << "global plan failed reason=global_search_failed elapsed_ms=" << elapsedMs(begin);
@@ -390,10 +388,8 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     {
         if (searched) return false;
         searched = true;
-        local_input_->map = input.map;
-        local_input_->start = {pose.x(), pose.y(), 0};
-        local_input_->goal = {target.x(), target.y(), 0};
-        auto route = local_searcher_->search();
+        *search_input_ = {{pose.x(), pose.y(), 0}, {target.x(), target.y(), 0}, input.map, 0};
+        auto route = searcher_->search();
         initial_source = "astar";
         return route.success && geometricSeed(route.path);
     };
