@@ -55,7 +55,8 @@ void Planner::reset()
     progress_ = 0;
     previous_trajectory_ = {};
     force_search_ = false;
-    phase_ = MotionPhase::NewPath;
+    phase_ = resume_phase_ = MotionPhase::NewPath;
+    rotation_ready_ = false;
     alignment_yaw_ = 0;
     stopped_since_ = -1;
 }
@@ -163,6 +164,10 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     LocalPlanResult result;
     auto fail = [&](const char *reason)
     {
+        if (phase_ != MotionPhase::Stuck)
+            resume_phase_ = phase_;
+        phase_ = MotionPhase::Stuck;
+        stopped_since_ = -1;
         discardWarmStart();
         LOGW(PLANNER_TAG) << "local plan failed reason=" << reason << " seed=" << initial_source
                         << " reset=" << reset_reason << " esdf_ms=" << esdf_ms << " elapsed_ms=" << elapsedMs(begin);
@@ -182,13 +187,26 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         !std::isfinite(angular_acceleration) || !std::isfinite(state.stamp))
         return fail("invalid_input");
 
-    auto command = [&](double v, double w, const char *status)
+    if (phase_ == MotionPhase::Stuck)
+        phase_ = resume_phase_;
+
+    auto command = [&](double v, double w, const char *status, bool pure_rotation = false)
     {
         v = std::clamp(v, linear_velocity - control.max_acceleration * control.control_period,
                          linear_velocity + control.max_acceleration * control.control_period);
-        w = std::clamp(w, angular_velocity - control.max_angular_acceleration * control.control_period,
-                         angular_velocity + control.max_angular_acceleration * control.control_period);
-        result.velocity = std::clamp(v, 0.0, control.max_velocity);
+        if (pure_rotation && phase_ != MotionPhase::StartRotating)
+        {
+            // 参考 directionAlign：限制角速度幅值上升，收零不再经过对称减速限幅。
+            double limit = std::abs(angular_velocity) + control.max_rotation_acceleration * control.control_period;
+            w = std::clamp(w, -limit, limit);
+        }
+        else
+        {
+            double acceleration = pure_rotation ? control.max_rotation_acceleration : control.max_angular_acceleration;
+            w = std::clamp(w, angular_velocity - acceleration * control.control_period,
+                             angular_velocity + acceleration * control.control_period);
+        }
+        result.velocity = pure_rotation ? 0 : std::clamp(v, 0.0, control.max_velocity);
         result.angular_velocity = std::clamp(w, -control.max_angular_velocity, control.max_angular_velocity);
         result.success = true;
         LOGD(PLANNER_TAG) << "local plan " << status << " v=" << result.velocity << " w=" << result.angular_velocity
@@ -215,95 +233,98 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     {
         alignment_yaw_ = pathYaw(std::min(path_lengths_.back(), progress + param_.waypoint_spacing / 2));
         phase_ = std::abs(wrap(alignment_yaw_ - pose.z())) > param_.rotate_threshold ?
-            MotionPhase::StartBraking : MotionPhase::Tracking;
+            MotionPhase::StartRotating : MotionPhase::Navigating;
+        rotation_ready_ = false;
         stopped_since_ = -1;
     }
-    if ((phase_ == MotionPhase::Tracking || phase_ == MotionPhase::StartBraking ||
-         phase_ == MotionPhase::StartRotating) && goal_distance <= param_.position_tolerance)
+    if ((phase_ == MotionPhase::Navigating || phase_ == MotionPhase::StartRotating) &&
+        goal_distance <= param_.position_tolerance)
     {
-        phase_ = MotionPhase::GoalBraking;
+        phase_ = MotionPhase::GoalRotating;
+        alignment_yaw_ = goal_.z();
         previous_trajectory_ = {};
+        rotation_ready_ = false;
         stopped_since_ = -1;
     }
-    if (phase_ == MotionPhase::StartBraking || phase_ == MotionPhase::GoalBraking)
+    if (phase_ == MotionPhase::GoalRotating && goal_distance > param_.position_tolerance)
     {
-        result.local_goal = phase_ == MotionPhase::GoalBraking ? goal_ : pose;
-        if (!stopped())
-            return command(0, 0, phase_ == MotionPhase::GoalBraking ? "goal_braking" : "initial_braking");
-        if (phase_ == MotionPhase::StartBraking)
-            phase_ = MotionPhase::StartRotating;
-        else
-        {
-            phase_ = goal_distance <= param_.position_tolerance ? MotionPhase::GoalRotating : MotionPhase::Tracking;
-            alignment_yaw_ = goal_.z();
-        }
+        phase_ = MotionPhase::Navigating;
+        previous_trajectory_ = {};
+        force_search_ = false;
+        rotation_ready_ = false;
         stopped_since_ = -1;
     }
+    auto updateEsdf = [&]()
+    {
+        auto esdf_begin = std::chrono::steady_clock::now();
+        if (cached_map_ != input.map)
+        {
+            esdf_ = std::make_shared<map::EsdfMap2D>(*input.map);
+            cached_map_ = input.map;
+        }
+        esdf_ms = elapsedMs(esdf_begin);
+    };
     if (phase_ == MotionPhase::StartRotating || phase_ == MotionPhase::GoalRotating)
     {
-        if (phase_ == MotionPhase::GoalRotating && goal_distance > param_.position_tolerance)
+        bool initial = phase_ == MotionPhase::StartRotating;
+        const char *status = initial ? "initial_rotating" : "goal_rotating";
+        result.local_goal << pose.head<2>(), unwrap(alignment_yaw_, pose.z());
+        // 入场先减速停稳；停稳后的旋转命令严格不含线速度。
+        if (!rotation_ready_)
         {
-            phase_ = MotionPhase::Tracking;
+            if (!stopped())
+                return command(0, 0, initial ? "initial_braking" : "goal_braking");
+            rotation_ready_ = true;
+            stopped_since_ = -1;
+        }
+        double error = wrap(alignment_yaw_ - pose.z());
+        double tolerance = initial ? param_.start_yaw_tolerance : param_.yaw_tolerance;
+        if (std::abs(error) <= tolerance)
+        {
+            if (!stopped())
+                return command(0, 0, status, true);
+            phase_ = initial ? MotionPhase::Navigating : MotionPhase::Finished;
             previous_trajectory_ = {};
             force_search_ = false;
+            rotation_ready_ = false;
             stopped_since_ = -1;
-        }
-        else if (std::abs(wrap(alignment_yaw_ - pose.z())) <= param_.yaw_tolerance)
-        {
-            if (stopped())
-            {
-                phase_ = phase_ == MotionPhase::StartRotating ? MotionPhase::Tracking : MotionPhase::Finished;
-                previous_trajectory_ = {};
-                force_search_ = false;
-                stopped_since_ = -1;
-            }
-            else
-            {
-                // 已对齐时先收零角速度，避免继续追小角度误差而无法稳定停下。
-                result.local_goal << pose.head<2>(), unwrap(alignment_yaw_, pose.z());
-                return command(0, 0, phase_ == MotionPhase::StartRotating ? "initial_rotating" : "goal_rotating");
-            }
         }
         else
+        {
             stopped_since_ = -1;
+            updateEsdf();
+            // 当前机器人净距按外接圆计算，原地旋转不改变圆形包络。
+            double clearance = 0;
+            robot_->clearance(planar_pose, *esdf_, clearance);
+            if (!std::isfinite(clearance) || clearance < 0)
+                return fail("rotation_collision");
+            return command(0, control.heading_gain * error, status, true);
+        }
     }
     if (phase_ == MotionPhase::Finished)
     {
         result.goal_reached = true;
         result.local_goal = goal_;
-        return command(0, 0, "goal_reached");
+        return command(0, 0, "goal_reached", true);
     }
 
-    auto esdf_begin = std::chrono::steady_clock::now();
-    if (cached_map_ != input.map)
-    {
-        esdf_ = std::make_shared<map::EsdfMap2D>(*input.map);
-        cached_map_ = input.map;
-    }
-    esdf_ms = elapsedMs(esdf_begin);
-    bool rotating = phase_ == MotionPhase::StartRotating || phase_ == MotionPhase::GoalRotating;
+    updateEsdf();
     double target_distance = std::min(path_lengths_.back(), progress + param_.lookahead_distance);
     Eigen::Vector3d target = pose;
-    if (rotating)
-        target.z() = unwrap(alignment_yaw_, pose.z());
-    else
+    bool target_found = false;
+    while (target_distance >= progress)
     {
-        bool target_found = false;
-        while (target_distance >= progress)
+        target = pathPoint(target_distance);
+        target.z() = unwrap(pathYaw(target_distance), pose.z());
+        if (!input.map->occupied({target.x(), target.y(), 0}))
         {
-            target = pathPoint(target_distance);
-            target.z() = unwrap(pathYaw(target_distance), pose.z());
-            if (!input.map->occupied({target.x(), target.y(), 0}))
-            {
-                target_found = true;
-                break;
-            }
-            target_distance -= input.map->resolution();
+            target_found = true;
+            break;
         }
-        if (!target_found) return fail("no_free_lookahead");
+        target_distance -= input.map->resolution();
     }
-    bool final = phase_ == MotionPhase::GoalRotating ||
-        (!rotating && target_distance >= path_lengths_.back() - 1e-6);
+    if (!target_found) return fail("no_free_lookahead");
+    bool final = target_distance >= path_lengths_.back() - 1e-6;
     auto &plan = *optimizer_input_;
     // 每次起点完全使用外部实测状态；旧轨迹只提供中间点和时间初值。
     plan.start.position = pose;
@@ -336,7 +357,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
             for (int j = 1; j <= count; ++j)
                 knots.push_back(simplified[i - 1] + (simplified[i] - simplified[i - 1]) * (static_cast<double>(j) / count));
         }
-        if (rotating) knots = {pose, target};
         if (knots.size() < 2) return false;
         double yaw = pose.z();
         for (std::size_t i = 1; i < knots.size(); ++i)
@@ -350,8 +370,8 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
             }
             if (i + 1 < knots.size()) right = i + 1;
             Eigen::Vector2d delta = (knots[right] - knots[left]).head<2>();
-            if (!rotating && delta.norm() > 1e-8) yaw = unwrap(std::atan2(delta.y(), delta.x()), yaw);
-            knots[i].z() = rotating ? target.z() : yaw;
+            if (delta.norm() > 1e-8) yaw = unwrap(std::atan2(delta.y(), delta.x()), yaw);
+            knots[i].z() = yaw;
         }
         // 全局切片和 A* 均使用路径切线；最终目标 yaw 只在停稳后单独处理。
         plan.goal.position = knots.back();
@@ -368,7 +388,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     bool searched = false;
     auto searchSeed = [&]()
     {
-        if (searched || rotating) return false;
+        if (searched) return false;
         searched = true;
         local_input_->map = input.map;
         local_input_->start = {pose.x(), pose.y(), 0};
@@ -380,12 +400,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
 
     double passed = state.stamp - previous_start_time_;
     double remaining = previous_trajectory_.getPieceNum() > 0 ? previous_trajectory_.getTotalDuration() - passed : 0;
-    if (rotating)
-    {
-        initial_source = "rotation";
-        if (!geometricSeed({pose, target})) return fail("empty_rotation_seed");
-    }
-    else if (force_search_)
+    if (force_search_)
     {
         if (!searchSeed()) return fail("local_search_failed");
     }
@@ -436,7 +451,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     {
         plan.goal.velocity.setZero();
         plan.goal.acceleration.setZero();
-        if (!final && !rotating)
+        if (!final)
             plan.goal.velocity << param_.cruise_speed * std::cos(plan.goal.position.z()),
                                   param_.cruise_speed * std::sin(plan.goal.position.z()), 0;
         plan.touches_goal = final;
@@ -453,18 +468,15 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
         }
         reset_reason = "optimization_failed";
         discardWarmStart();
-        if (searched || rotating) break;
+        if (searched) break;
         if (!searchSeed()) return fail("local_search_failed");
     }
     if (!optimized_success) return fail("local_optimization_failed");
     result.local_goal = plan.goal.position;
-    if (!rotating)
-    {
-        previous_trajectory_ = result.trajectory;
-        previous_start_time_ = state.stamp;
-        previous_target_distance_ = target_distance;
-        force_search_ = false;
-    }
+    previous_trajectory_ = result.trajectory;
+    previous_start_time_ = state.stamp;
+    previous_target_distance_ = target_distance;
+    force_search_ = false;
     double sample = 0, distance = 0;
     auto durations = result.trajectory.getDurations();
     int intervals = optimizer_->param().integration_intervals;
@@ -491,11 +503,6 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
     if (final)
         v = std::min(v, std::sqrt(2 * control.max_acceleration * std::max(0.0, goal_distance - param_.position_tolerance / 2)));
     double w = control.lateral_gain * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
-    if (rotating)
-    {
-        v = 0;
-        w = control.heading_gain * wrap(alignment_yaw_ - pose.z()) - control.angular_damping * angular_velocity;
-    }
-    return command(v, w, rotating ? (phase_ == MotionPhase::StartRotating ? "initial_rotating" : "goal_rotating") : "tracking");
+    return command(v, w, "navigating");
 }
 } // namespace navapex::planner

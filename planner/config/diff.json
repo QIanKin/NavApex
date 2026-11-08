@@ -5,7 +5,8 @@
     "cruise_speed": 0.18,
     "position_tolerance": 0.10,
     "yaw_tolerance": 0.10,
-    "rotate_threshold": 1.05
+    "rotate_threshold": 1.05,
+    "start_yaw_tolerance": 0.35
   },
   "controller": {
     "period": 0.1,
@@ -13,11 +14,11 @@
     "max_angular_velocity": 1.0,
     "max_acceleration": 0.4,
     "max_angular_acceleration": 1.5,
+    "max_rotation_acceleration": 2.0,
     "position_gain": 1.5,
     "lateral_gain": 2.0,
-    "heading_gain": 2.0,
+    "heading_gain": 0.8,
     "tracking_distance": 0.25,
-    "angular_damping": 0.5,
     "stopped_velocity": 0.02,
     "stopped_angular_velocity": 0.05,
     "stopped_duration": 0.2

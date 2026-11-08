@@ -17,6 +17,7 @@ public:
     double position_tolerance = 0.10;
     double yaw_tolerance = 0.10;
     double rotate_threshold = 1.05;
+    double start_yaw_tolerance = 0.35;
 
     // 控制与跟踪
     double control_period = 0.1;
@@ -24,11 +25,11 @@ public:
     double max_angular_velocity = 1.0;
     double max_acceleration = 0.4;
     double max_angular_acceleration = 1.5;
+    double max_rotation_acceleration = 2.0; // 原地旋转提速；起步旋转同时限制减速。
     double position_gain = 1.5;
     double lateral_gain = 2;
-    double heading_gain = 2;
+    double heading_gain = 0.8;
     double tracking_distance = 0.25;
-    double angular_damping = 0.5;
     double stopped_velocity = 0.02;
     double stopped_angular_velocity = 0.05;
     double stopped_duration = 0.2;
@@ -56,6 +57,7 @@ public:
             position_tolerance = v.value("position_tolerance", position_tolerance);
             yaw_tolerance = v.value("yaw_tolerance", yaw_tolerance);
             rotate_threshold = v.value("rotate_threshold", rotate_threshold);
+            start_yaw_tolerance = v.value("start_yaw_tolerance", start_yaw_tolerance);
         }
         if (json.contains("controller"))
         {
@@ -65,11 +67,11 @@ public:
             max_angular_velocity = v.value("max_angular_velocity", max_angular_velocity);
             max_acceleration = v.value("max_acceleration", max_acceleration);
             max_angular_acceleration = v.value("max_angular_acceleration", max_angular_acceleration);
+            max_rotation_acceleration = v.value("max_rotation_acceleration", max_rotation_acceleration);
             position_gain = v.value("position_gain", position_gain);
             lateral_gain = v.value("lateral_gain", lateral_gain);
             heading_gain = v.value("heading_gain", heading_gain);
             tracking_distance = v.value("tracking_distance", tracking_distance);
-            angular_damping = v.value("angular_damping", angular_damping);
             stopped_velocity = v.value("stopped_velocity", stopped_velocity);
             stopped_angular_velocity = v.value("stopped_angular_velocity", stopped_angular_velocity);
             stopped_duration = v.value("stopped_duration", stopped_duration);

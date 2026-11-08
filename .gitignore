@@ -4,6 +4,7 @@ __pycache__/
 test/
 tests/
 !/perception/tests/
+!/planner/tests/
 log/
 .vscode/
 /ros2_test/build/

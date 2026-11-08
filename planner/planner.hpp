@@ -23,12 +23,11 @@ private:
     enum class MotionPhase
     {
         NewPath,
-        StartBraking,
         StartRotating,
-        Tracking,
-        GoalBraking,
+        Navigating,
         GoalRotating,
-        Finished
+        Finished,
+        Stuck
     };
 
     double updateProgress(const Eigen::Vector2d &position);
@@ -50,7 +49,9 @@ private:
     poly_traj::Trajectory<3> previous_trajectory_;
     double previous_start_time_ = 0, previous_target_distance_ = 0;
     bool force_search_ = false;
-    MotionPhase phase_ = MotionPhase::NewPath;
+    // Stuck 保留失败前阶段，下一轮重试时恢复。
+    MotionPhase phase_ = MotionPhase::NewPath, resume_phase_ = MotionPhase::NewPath;
+    bool rotation_ready_ = false;
     double alignment_yaw_ = 0, stopped_since_ = -1;
 };
 } // namespace navapex::planner
