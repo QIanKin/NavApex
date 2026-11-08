@@ -7,6 +7,7 @@ tests/
 !/src/planner/tests/
 log/
 .vscode/
+.clangd
 /ros2_test/build/
 /ros2_test/install/
 /ros2_test/log/
