@@ -7,6 +7,7 @@
 #include <fstream>
 #include <deque>
 #include <planner/planner.hpp>
+#include <planner/controller/trajectory_tracker.hpp>
 #include <tools/log.hpp>
 #include <tools/replay.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
@@ -58,6 +59,7 @@ public:
         planner_tools::initLog(logging);
         robot_ = robot_model::RobotModel::create();
         planner_ = std::make_unique<planner::Planner>(robot_);
+        tracker_ = std::make_unique<planner::TrajectoryTracker>(planner_->param());
         perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d");
         const auto &lidar = dynamic_cast<const perception::Lidar2DParams &>(perception_->param());
         planner_tools::setReplayMetadata(nlohmann::json({{"v", 1}, {"frame", frame_},
@@ -527,7 +529,14 @@ private:
                 planner::LocalPlanInput input;
                 input.map = snapshot.local;
                 input.state = snapshot.state;
-                storeResult(snapshot, planner_->planLocal(input));
+                auto result = planner_->planLocal(input);
+                if (result.success && result.trajectory.getPieceNum() > 0)
+                {
+                    auto command = tracker_->track(result, input.state, snapshot.goal);
+                    result.velocity = command.velocity;
+                    result.angular_velocity = command.angular_velocity;
+                }
+                storeResult(snapshot, result);
             }
             catch (const std::exception &error)
             {
@@ -544,6 +553,7 @@ private:
     tf2_ros::TransformListener listener_;
     std::shared_ptr<const robot_model::RobotModel> robot_;
     std::unique_ptr<planner::Planner> planner_;
+    std::unique_ptr<planner::TrajectoryTracker> tracker_;
     std::unique_ptr<perception::PerceptionInterface> perception_;
     std::deque<RecordedState> state_history_;
     sensor_msgs::msg::LaserScan::ConstSharedPtr pending_scan_;

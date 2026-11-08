@@ -255,18 +255,18 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
             double target_distance = std::min(path_lengths_.back(), progress + param_.lookahead_distance);
             Eigen::Vector3d target = pathPoint(target_distance);
             target.z() = unwrap(pathYaw(target_distance, pose.z()), pose.z());
-            auto &plan = *optimizer_input_;
-            plan.touches_goal = target_distance >= path_lengths_.back() - 1e-6;
+            auto &opt_input = *optimizer_input_;
+            opt_input.touches_goal = target_distance >= path_lengths_.back() - 1e-6;
             // 每次起点完全使用外部实测状态；旧轨迹只提供中间点和时间初值。
-            plan.start.position = pose;
-            plan.start.velocity << linear_velocity * std::cos(pose.z()), linear_velocity * std::sin(pose.z()), angular_velocity;
+            opt_input.start.position = pose;
+            opt_input.start.velocity << linear_velocity * std::cos(pose.z()), linear_velocity * std::sin(pose.z()), angular_velocity;
             // 输入是车体系中的运动加速度，旋转到世界系；向心分量已在输入中，不重复叠加。
-            plan.start.acceleration << linear_acceleration.x * std::cos(pose.z()) - linear_acceleration.y * std::sin(pose.z()),
+            opt_input.start.acceleration << linear_acceleration.x * std::cos(pose.z()) - linear_acceleration.y * std::sin(pose.z()),
                                        linear_acceleration.x * std::sin(pose.z()) + linear_acceleration.y * std::cos(pose.z()), angular_acceleration;
-            plan.map = input.map;
-            plan.esdf = esdf_;
-            plan.start_time = state.stamp;
-            plan.goal.position = target;
+            opt_input.map = input.map;
+            opt_input.esdf = esdf_;
+            opt_input.start_time = state.stamp;
+            opt_input.goal.position = target;
 
             // 2. 优先热启动或全局切片；优化失败后只补一次 A* 搜索和优化。
             double passed = state.stamp - previous_start_time_;
@@ -280,8 +280,8 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                     double extension = std::max(0.0, target_distance - previous_target_distance_) / param_.cruise_speed;
                     int pieces = std::max(2, static_cast<int>(std::ceil(param_.lookahead_distance / param_.waypoint_spacing)));
                     double duration = std::max(0.3 * pieces, remaining + extension);
-                    plan.durations = Eigen::VectorXd::Constant(pieces, duration / pieces);
-                    plan.inner_points.resize(3, pieces - 1);
+                    opt_input.durations = Eigen::VectorXd::Constant(pieces, duration / pieces);
+                    opt_input.inner_points.resize(3, pieces - 1);
                     double yaw = pose.z();
                     for (int i = 1; i < pieces; ++i)
                     {
@@ -296,7 +296,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                             point.z() = pathYaw(distance, pose.z());
                         }
                         point.z() = yaw = unwrap(point.z(), yaw);
-                        plan.inner_points.col(i - 1) = point;
+                        opt_input.inner_points.col(i - 1) = point;
                     }
                     double tail_time = std::max(0.0, remaining + extension - param_.waypoint_spacing / param_.cruise_speed);
                     Eigen::Vector3d tail_point;
@@ -306,7 +306,7 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                         tail_point = pathPoint(std::min(target_distance,
                             previous_target_distance_ + (tail_time - remaining) * param_.cruise_speed));
                     Eigen::Vector2d tail = (target - tail_point).head<2>();
-                    plan.goal.position.z() = unwrap(tail.norm() > 1e-8 ? std::atan2(tail.y(), tail.x()) : target.z(), yaw);
+                    opt_input.goal.position.z() = unwrap(tail.norm() > 1e-8 ? std::atan2(tail.y(), tail.x()) : target.z(), yaw);
                 }
                 else
                 {
@@ -371,25 +371,25 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                         knots[i].z() = yaw;
                     }
                     // 全局切片和 A* 均使用路径切线；最终目标 yaw 只在停稳后单独处理。
-                    plan.goal.position = knots.back();
-                    plan.inner_points.resize(3, knots.size() - 2);
-                    plan.durations.resize(knots.size() - 1);
+                    opt_input.goal.position = knots.back();
+                    opt_input.inner_points.resize(3, knots.size() - 2);
+                    opt_input.durations.resize(knots.size() - 1);
                     for (std::size_t i = 1; i < knots.size(); ++i)
                     {
-                        if (i + 1 < knots.size()) plan.inner_points.col(i - 1) = knots[i];
-                        plan.durations[i - 1] = std::max({0.3, (knots[i] - knots[i - 1]).head<2>().norm() / param_.cruise_speed,
+                        if (i + 1 < knots.size()) opt_input.inner_points.col(i - 1) = knots[i];
+                        opt_input.durations[i - 1] = std::max({0.3, (knots[i] - knots[i - 1]).head<2>().norm() / param_.cruise_speed,
                             std::abs(knots[i].z() - knots[i - 1].z()) / (0.5 * control.max_angular_velocity)});
                     }
                 }
 
-                plan.goal.velocity.setZero();
-                plan.goal.acceleration.setZero();
-                if (!plan.touches_goal)
-                    plan.goal.velocity << param_.cruise_speed * std::cos(plan.goal.position.z()),
-                                          param_.cruise_speed * std::sin(plan.goal.position.z()), 0;
+                opt_input.goal.velocity.setZero();
+                opt_input.goal.acceleration.setZero();
+                if (!opt_input.touches_goal)
+                    opt_input.goal.velocity << param_.cruise_speed * std::cos(opt_input.goal.position.z()),
+                                          param_.cruise_speed * std::sin(opt_input.goal.position.z()), 0;
                 poly_traj::MinJerkOpt<3> seed;
-                seed.reset(plan.start.matrix(), plan.goal.matrix(), plan.durations.size());
-                seed.generate(plan.inner_points, plan.durations);
+                seed.reset(opt_input.start.matrix(), opt_input.goal.matrix(), opt_input.durations.size());
+                seed.generate(opt_input.inner_points, opt_input.durations);
                 result.initial_trajectory = seed.getTraj();
                 auto optimized = optimizer_->optimize();
                 result.success = optimized.success;
@@ -407,44 +407,12 @@ LocalPlanResult Planner::planLocal(const LocalPlanInput &input)
                 return result;
             }
 
-            // 3. 保存热启动轨迹，取跟踪点并计算限幅后的速度。
-            result.local_goal = plan.goal.position;
+            // 3. 保存热启动轨迹；导航控制交给外部轨迹跟踪器。
+            result.local_goal = opt_input.goal.position;
             previous_trajectory_ = result.trajectory;
             previous_start_time_ = state.stamp;
             previous_target_distance_ = target_distance;
             force_search_ = false;
-            double sample = 0, distance = 0;
-            auto durations = result.trajectory.getDurations();
-            int intervals = optimizer_->param().integration_intervals;
-            int last = result.trajectory.getPieceNum() * intervals;
-            int check_end = plan.touches_goal ? last : last - (last - 1) / 3;
-            int end_piece = std::min(check_end / intervals, result.trajectory.getPieceNum() - 1);
-            double tracking_end = durations.head(end_piece).sum() + durations[end_piece] * (check_end - end_piece * intervals) / intervals;
-            Eigen::Vector3d previous = result.trajectory.getPos(0);
-            while (sample < tracking_end && distance < control.tracking_distance)
-            {
-                sample = std::min(sample + 0.05, tracking_end);
-                Eigen::Vector3d point = result.trajectory.getPos(sample);
-                distance += (point - previous).head<2>().norm();
-                previous = point;
-            }
-            Eigen::Vector3d desired = result.trajectory.getPos(sample), velocity = result.trajectory.getVel(sample);
-            double c = std::cos(pose.z()), s = std::sin(pose.z());
-            Eigen::Vector2d error = (desired - pose).head<2>();
-            double forward = std::cos(desired.z()) * velocity.x() + std::sin(desired.z()) * velocity.y();
-            double bearing = wrap(std::atan2(error.y(), error.x()) - pose.z());
-            double v = std::min(param_.cruise_speed, std::max(0.0, forward) +
-                control.position_gain * std::max(0.0, c * error.x() + s * error.y()));
-            v *= std::max(0.0, std::cos(bearing));
-            if (plan.touches_goal)
-                v = std::min(v, std::sqrt(2 * control.max_acceleration * std::max(0.0, goal_distance - param_.position_tolerance / 2)));
-            double w = control.lateral_gain * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
-            v = std::clamp(v, linear_velocity - control.max_acceleration * control.control_period,
-                             linear_velocity + control.max_acceleration * control.control_period);
-            w = std::clamp(w, angular_velocity - control.max_angular_acceleration * control.control_period,
-                             angular_velocity + control.max_angular_acceleration * control.control_period);
-            result.velocity = std::clamp(v, 0.0, control.max_velocity);
-            result.angular_velocity = std::clamp(w, -control.max_angular_velocity, control.max_angular_velocity);
             result.success = true;
             return result;
         }

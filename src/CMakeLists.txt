@@ -143,9 +143,15 @@ target_link_libraries(planner_core PUBLIC planner::optimizer planner::searcher p
   PRIVATE planner::log)
 target_compile_options(planner_core PRIVATE -Wall -Wextra -Wpedantic)
 
+add_library(planner_controller STATIC planner/controller/trajectory_tracker.cpp)
+add_library(planner::controller ALIAS planner_controller)
+set_target_properties(planner_controller PROPERTIES EXPORT_NAME controller)
+target_link_libraries(planner_controller PUBLIC planner::params planner::map)
+target_compile_options(planner_controller PRIVATE -Wall -Wextra -Wpedantic)
+
 include(GNUInstallDirs)
 install(TARGETS planner_utils planner_map planner_log planner_replay planner_params planner_omni3d planner_diff planner_optimizer planner_robot_model
-  planner_search_params planner_astar planner_searcher planner_esdf planner_core planner_perception EXPORT PlannerTargets
+  planner_search_params planner_astar planner_searcher planner_esdf planner_core planner_perception planner_controller EXPORT PlannerTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(DIRECTORY planner/traj_opt/optimizer/omni_3d_opt/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY planner/traj_opt/optimizer/diff_opt/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
@@ -170,6 +176,8 @@ install(DIRECTORY robot_model/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/robot_mod
   FILES_MATCHING PATTERN "*.hpp")
 install(FILES tools/log.hpp tools/replay.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
 install(FILES planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
+install(DIRECTORY planner/controller/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/controller
+  FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY planner/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/params
   FILES_MATCHING PATTERN "*.hpp")
 install(EXPORT PlannerTargets NAMESPACE planner:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
@@ -203,7 +211,7 @@ option(NAVAPEX_BUILD_PLANNER_TESTS "Build planner FSM integration tests" OFF)
 if(NAVAPEX_BUILD_PLANNER_TESTS)
   enable_testing()
   add_executable(planner_fsm_test planner/tests/planner_fsm_test.cpp)
-  target_link_libraries(planner_fsm_test PRIVATE planner::core)
+  target_link_libraries(planner_fsm_test PRIVATE planner::core planner::controller)
   add_test(NAME planner_fsm_test COMMAND planner_fsm_test)
 endif()
 

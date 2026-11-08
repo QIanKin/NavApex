@@ -80,7 +80,7 @@ RViz 已配置 **Rolling Local Costmap**，订阅 `/navapex/local_costmap`，类
 | `/cmd_vel` | `geometry_msgs/Twist` | 线速度 x、角速度 z |
 | `/navapex/cancel` | `std_srvs/Trigger` | 取消并停车 |
 
-规划线程与控制发布分离：规划请求 10 Hz，控制发布 20 Hz。规划失败、输入过期、计算超时或目标切换后，不执行旧的非零控制。取消后可手动发布速度：
+规划线程与控制发布分离：规划请求 10 Hz，控制发布 20 Hz。每次 `planLocal` 返回导航轨迹后，外层调用一次 `TrajectoryTracker::track`，使用同一帧规划状态和原来的 0.1 秒控制周期计算速度。规划失败、输入过期、计算超时或目标切换后，不执行旧的非零控制。取消后可手动发布速度：
 
 ```bash
 ros2 service call /navapex/cancel std_srvs/srv/Trigger '{}'

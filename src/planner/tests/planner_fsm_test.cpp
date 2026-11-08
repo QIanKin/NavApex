@@ -1,4 +1,5 @@
 #include <planner/planner.hpp>
+#include <planner/controller/trajectory_tracker.hpp>
 #include <perception/maps/grid_map_2d.hpp>
 #include <cmath>
 #include <fstream>
@@ -216,11 +217,18 @@ void failureRecovery()
 void closedLoop()
 {
     Planner planner(robot_model::RobotModel::create());
+    planner::TrajectoryTracker tracker(planner.param());
     auto input = inputAt(0, pi / 2);
     plan(planner, input, -pi / 2);
     for (int i = 0; i < 700; ++i)
     {
         auto result = tick(planner, input);
+        if (result.success && result.trajectory.getPieceNum() > 0)
+        {
+            auto command = tracker.track(result, input.state, {2, 0, -pi / 2});
+            result.velocity = command.velocity;
+            result.angular_velocity = command.angular_velocity;
+        }
         require(result.success, "closed loop planning failed");
         require(result.velocity >= 0 && result.velocity <= planner.param().max_velocity &&
                 std::abs(result.angular_velocity) <= planner.param().max_angular_velocity,
