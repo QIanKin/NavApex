@@ -29,8 +29,10 @@ private:
     {
         NewPath,
         StartRotating,
+        Rotating,
         Navigating,
         GoalRotating,
+        DirectionAlign,
         Finished
     };
 
@@ -46,16 +48,14 @@ private:
     std::shared_ptr<const robot_model::RobotModel> robot_;
     std::shared_ptr<const perception::OccupancyMap> cached_map_;
     std::shared_ptr<const map::EsdfMap2D> esdf_;
-    std::vector<Eigen::Vector3d> global_path_; // 几何位置 (x, y, z)，不保存 yaw。
+    std::vector<Eigen::Vector3d> global_path_;
     std::vector<double> path_lengths_;
     Eigen::Vector3d goal_ = Eigen::Vector3d::Zero();
     double progress_ = 0;
     poly_traj::Trajectory<3> previous_trajectory_;
     double previous_start_time_ = 0, previous_target_distance_ = 0;
     bool force_search_ = false;
-    // 失败保留当前运动阶段，下一次有效输入直接重试。
     MotionPhase phase_ = MotionPhase::NewPath;
-    bool rotation_ready_ = false;
-    double alignment_yaw_ = 0, stopped_since_ = -1;
+    double alignment_yaw_ = 0;
 };
 } // namespace navapex::planner

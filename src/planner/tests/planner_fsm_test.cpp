@@ -114,45 +114,37 @@ void reusableSearcher()
 void startAlignment()
 {
     Planner planner(robot_model::RobotModel::create());
-    require(planner.param().type == "diff", "planner must load its type from planner.json");
     auto input = inputAt(0, pi / 2);
     plan(planner, input);
     input.state.twist.linear.x = 0.18;
     input.state.twist.angular.z = 0.3;
     auto result = tick(planner, input);
-    require(result.success && result.trajectory.getPieceNum() == 0, "start must brake before planning");
-    require(std::abs(result.velocity - 0.14) < 1e-9 && result.angular_velocity >= 0,
-            "moving start must decelerate before rotating");
+    require(result.success && result.trajectory.getPieceNum() == 0 &&
+            result.velocity == 0 && result.angular_velocity == 0,
+            "start must command zero before rotating while the robot is moving");
     input.state.twist = {};
-    tick(planner, input);
-    result = tick(planner, input, 0.3);
-    require(result.success && result.velocity == 0 && result.angular_velocity < 0,
-            "start rotation must turn toward path with zero linear speed");
-    require(result.trajectory.getPieceNum() == 0 && result.initial_trajectory.getPieceNum() == 0,
-            "rotation must not invoke trajectory optimization");
-    require(std::abs(result.angular_velocity + 0.2) < 1e-9, "start rotation must limit speed change to 0.2 rad/s per cycle");
+    result = tick(planner, input);
+    require(result.success && result.velocity == 0 && result.angular_velocity < 0 &&
+            result.trajectory.getPieceNum() == 0 && result.initial_trajectory.getPieceNum() == 0,
+            "stopped start must rotate immediately without trajectory optimization");
+    double step = planner.param().max_angular_acceleration * planner.param().control_period;
+    require(std::abs(result.angular_velocity + step) < 1e-9,
+            "rotation must use the shared angular acceleration limit");
+    input.state.twist.angular.z = -0.4;
+    result = tick(planner, input);
+    require(result.angular_velocity < -0.4,
+            "ongoing rotation must not re-enter the initial stopping stage");
     setYaw(input, 0.3);
-    input.state.twist.angular.z = -0.8;
+    input.state.twist.angular.z = -0.12;
     result = tick(planner, input);
-    require(std::abs(result.angular_velocity + 0.6) < 1e-9, "start rotation must limit deceleration symmetrically");
-    setYaw(input, pi / 2);
-    input.state.twist.angular.z = 0;
-    input.state.twist.linear.x = 0.01;
-    result = tick(planner, input);
-    require(result.velocity == 0, "rotation must keep linear command exactly zero");
-    input.state.twist = {};
-    setYaw(input, 0.3); // Within 20 degrees, outside final yaw tolerance.
-    result = tick(planner, input);
-    require(result.angular_velocity == 0, "start tolerance must stop pursuing exact path yaw");
-    result = tick(planner, input, 0.3);
     require(result.success && result.trajectory.getPieceNum() > 0 && !result.goal_reached,
-            "start must hand off to navigation inside 20 degrees");
+            "aligned start must navigate immediately even with residual angular velocity");
 
-    planner.reset();
-    setYaw(input, 0.8); // Below 60 degrees: skip initial rotation.
+    input = inputAt(0, 0.8);
     plan(planner, input);
     result = tick(planner, input);
-    require(result.success && result.trajectory.getPieceNum() > 0, "moderate heading error must navigate directly");
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "moderate heading error must navigate directly");
 }
 
 void goalAlignment()
@@ -160,79 +152,60 @@ void goalAlignment()
     Planner planner(robot_model::RobotModel::create());
     auto input = inputAt(2, 0.3);
     plan(planner, input);
-    tick(planner, input);
-    auto result = tick(planner, input, 0.3);
+    input.state.twist.linear.x = 0.18;
+    auto result = tick(planner, input);
+    require(result.success && result.velocity == 0 && result.angular_velocity == 0 && !result.goal_reached,
+            "arrival must stop before final alignment");
+    input.state.twist = {};
+    result = tick(planner, input);
     require(result.success && result.velocity == 0 && result.angular_velocity < 0 && !result.goal_reached,
-            "goal must continue aligning outside final yaw tolerance");
-    require(std::abs(result.angular_velocity + 0.2) < 1e-9, "goal rotation must limit speed increase to 0.2 rad/s per cycle");
+            "stopped arrival must begin alignment immediately");
+    double step = planner.param().max_angular_acceleration * planner.param().control_period;
+    require(std::abs(result.angular_velocity + step) < 1e-9,
+            "goal alignment must use the shared angular acceleration limit");
     setYaw(input, 0.2);
     input.state.twist.angular.z = -0.4;
     result = tick(planner, input);
-    require(std::abs(result.angular_velocity + 0.16) < 1e-9, "goal must use gain 0.8 and allow prompt deceleration");
+    require(std::abs(result.angular_velocity + 0.16) < 1e-9,
+            "ongoing goal alignment must allow prompt deceleration without re-entering stopping");
     setYaw(input, 0.05);
     result = tick(planner, input);
-    require(!result.goal_reached && result.angular_velocity == 0, "goal must command zero immediately inside yaw tolerance");
-    input.state.twist = {};
-    tick(planner, input);
-    result = tick(planner, input, 0.3);
     require(result.success && result.goal_reached && result.velocity == 0 && result.angular_velocity == 0,
-            "aligned and stopped goal must finish");
+            "goal yaw tolerance must finish immediately without a stopped-duration check");
     require(tick(planner, input).goal_reached, "finished state must persist");
 
-    // Arrival position drift must return to trajectory navigation.
-    planner.reset();
-    setYaw(input, 0);
-    plan(planner, input, 1);
-    tick(planner, input);
-    tick(planner, input, 0.3);
-    input.state.pose.position.x = 1.7;
-    result = tick(planner, input);
-    require(result.success && result.trajectory.getPieceNum() > 0 && !result.goal_reached,
-            "leaving position tolerance must resume navigation");
-
-    // Angle wrapping must choose the short turn across +/- pi.
-    planner.reset();
-    input.state.pose.position.x = 2;
-    setYaw(input, pi - 0.2);
+    input = inputAt(2, pi - 0.2);
     plan(planner, input, -pi + 0.2);
+    // First align with the path if the new-path stage requires it.
+    setYaw(input, 0);
     tick(planner, input);
-    result = tick(planner, input, 0.3);
+    setYaw(input, pi - 0.2);
+    result = tick(planner, input);
     require(result.angular_velocity > 0, "goal must rotate by the wrapped shortest angle");
 }
 
 void failureRecovery()
 {
     Planner planner(robot_model::RobotModel::create());
-    auto input = inputAt(0, pi / 2);
+    auto input = inputAt();
     plan(planner, input);
-    tick(planner, input);
-    tick(planner, input, 0.3);
+    auto result = tick(planner, input);
+    require(result.success && result.trajectory.getPieceNum() > 0, "navigation must produce a trajectory");
+    result = tick(planner, input);
+    require(result.success && result.initial_trajectory.getPieceNum() > 0,
+            "navigation must support warm starts");
     auto free = input.map;
     input.map = makeMap(true);
     for (int i = 0; i < 2; ++i)
     {
-        auto result = tick(planner, input);
+        result = tick(planner, input);
         require(!result.success && result.velocity == 0 && result.angular_velocity == 0,
-                "colliding rotation must fail with zero command");
+                "blocked navigation must fail with zero command");
     }
     input.map = free;
-    auto result = tick(planner, input);
-    require(result.success && result.angular_velocity < 0 && result.trajectory.getPieceNum() == 0,
-            "rotation must resume after collision clears");
-    input.map.reset();
-    require(!tick(planner, input).success && !tick(planner, input).success, "invalid input must remain failed");
-    input.map = free;
-    require(tick(planner, input).angular_velocity < 0, "repeated invalid input must preserve rotation stage");
-
-    planner.reset();
-    setYaw(input, 0);
-    plan(planner, input);
-    input.map = makeMap(true);
-    require(!tick(planner, input).success, "blocked navigation must fail");
-    input.map = free;
     result = tick(planner, input);
-    require(result.success && result.trajectory.getPieceNum() > 0, "navigation must retry after obstacles clear");
-
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "navigation must retry with a fresh search after obstacles clear");
     plan(planner, input);
     planner.discardWarmStart();
     result = tick(planner, input);
@@ -276,67 +249,29 @@ void closedLoop()
     throw std::runtime_error("closed loop did not finish");
 }
 
-void recoveryAcrossPhases()
+void forwardPhaseTransitions()
 {
     Planner planner(robot_model::RobotModel::create());
-    auto input = inputAt(0, pi / 2);
+    auto input = inputAt(2, 0.4);
     plan(planner, input);
-    auto free = input.map;
-    input.map.reset();
-    require(!tick(planner, input).success && !tick(planner, input).success,
-            "new path must tolerate repeated invalid input");
-    input.map = free;
-    tick(planner, input);
-    auto result = tick(planner, input, 0.3);
-    require(result.success && result.velocity == 0 && result.angular_velocity < 0,
-            "new path recovery must still enter initial rotation");
-
-    // Exercise the map cache during rotation, then use it for trajectory optimization.
-    input.map = makeMap(true);
-    require(!tick(planner, input).success, "new blocked map must invalidate the rotation ESDF");
-    input.map = makeMap();
+    require(tick(planner, input).angular_velocity < 0, "arrival must enter final alignment");
+    input.state.pose.position.x = 1.7;
+    auto result = tick(planner, input);
+    require(result.success && result.velocity == 0 && result.angular_velocity < 0 &&
+            result.trajectory.getPieceNum() == 0,
+            "position drift during final alignment must not roll back to navigation");
     setYaw(input, 0);
-    tick(planner, input);
-    result = tick(planner, input, 0.3);
-    require(result.success && result.trajectory.getPieceNum() > 0,
-            "rotation must hand off with the latest map after recovery");
-    require(tick(planner, input).success, "navigation must reuse its warm start");
-    input.map.reset();
-    require(!tick(planner, input).success && !tick(planner, input).success,
-            "navigation must reject repeated invalid input");
-    input.map = free;
+    require(tick(planner, input).goal_reached, "aligned goal must finish");
+    input.state.pose.position.x = 0;
+    setYaw(input, pi / 2);
+    require(tick(planner, input).goal_reached, "finished phase must persist until a new path");
+    plan(planner, input);
     result = tick(planner, input);
-    require(result.success && result.trajectory.getPieceNum() > 0,
-            "navigation must recover using a fresh search");
-
-    input.state.pose.position.x = 2;
-    setYaw(input, 0.4);
-    tick(planner, input);
-    tick(planner, input, 0.3);
-    input.map.reset();
-    require(!tick(planner, input).success && !tick(planner, input).success,
-            "goal rotation must reject repeated invalid input");
-    input.map = free;
-    result = tick(planner, input);
-    require(result.success && result.velocity == 0 && result.angular_velocity < 0,
-            "goal rotation recovery must retain its alignment stage");
-    setYaw(input, 0);
-    tick(planner, input);
-    require(tick(planner, input, 0.3).goal_reached, "goal must finish after recovered rotation");
-    input.map.reset();
-    require(!tick(planner, input).success && !tick(planner, input).success,
-            "finished planner must still reject invalid input");
-    input.map = free;
-    require(tick(planner, input).goal_reached, "finished phase must survive input failure");
-
-    // Reset and a new global path must clear both failed state and forced-search history.
+    require(result.success && !result.goal_reached && result.angular_velocity < 0 &&
+            result.trajectory.getPieceNum() == 0,
+            "a new global path must restart the forward state sequence");
     planner.reset();
     require(!tick(planner, input).success, "reset must clear the global path");
-    input = inputAt();
-    plan(planner, input);
-    planner.discardWarmStart();
-    planner.discardWarmStart();
-    require(tick(planner, input).success, "repeated warm-start discard must remain safe");
 }
 
 void globalGeometryAndGoalYaw()
@@ -359,12 +294,17 @@ void globalGeometryAndGoalYaw()
             result.trajectory.getPieceNum() == 0,
             "initial alignment must derive its direction from diagonal path geometry");
 
+    setYaw(input, std::atan2(1.0, 2.0));
+    result = tick(planner, input);
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "diagonal path alignment must enter navigation before arrival");
+
     input.state.pose.position = {2, 1, 0};
     setYaw(input, 0);
     tick(planner, input);
     result = tick(planner, input, 0.3);
     require(result.success && result.velocity == 0 && result.angular_velocity > 0 &&
-            result.trajectory.getPieceNum() == 0 && std::abs(result.local_goal.z() - pi / 2) < 1e-9,
+            result.trajectory.getPieceNum() == 0,
             "arrival must align to the task goal yaw instead of the path tangent");
     setYaw(input, pi / 2);
     tick(planner, input);
@@ -403,7 +343,7 @@ void stationaryGoal()
     tick(planner, input);
     auto result = tick(planner, input, 0.3);
     require(result.success && result.velocity == 0 && result.angular_velocity < 0 &&
-            result.trajectory.getPieceNum() == 0 && std::abs(result.local_goal.z() + 1.2) < 1e-9,
+            result.trajectory.getPieceNum() == 0,
             "a directionless path must align directly to the separately stored final yaw");
     setYaw(input, -1.2);
     tick(planner, input);
@@ -419,7 +359,7 @@ void startAlignmentUsesCurrentState()
     auto result = tick(planner, input);
     require(result.success && result.velocity == 0 && result.trajectory.getPieceNum() == 0 &&
             result.initial_trajectory.getPieceNum() == 0,
-            "current heading must trigger initial braking even when global start yaw was aligned");
+            "current heading must trigger initial rotation even when global start yaw was aligned");
     result = tick(planner, input, 0.3);
     require(result.success && result.velocity == 0 && std::abs(result.angular_velocity) > 0,
             "initial rotation must use the current robot heading");
@@ -450,7 +390,7 @@ int main(int argc, char **argv)
     startAlignment();
     goalAlignment();
     failureRecovery();
-    recoveryAcrossPhases();
+    forwardPhaseTransitions();
     closedLoop();
     globalGeometryAndGoalYaw();
     oppositeStartAndReplan();

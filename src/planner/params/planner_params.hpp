@@ -27,14 +27,10 @@ public:
     double max_angular_velocity = 1.0;
     double max_acceleration = 0.4;
     double max_angular_acceleration = 1.5;
-    double max_rotation_acceleration = 2.0; // 原地旋转提速；起步旋转同时限制减速。
     double position_gain = 1.5;
     double lateral_gain = 2;
     double heading_gain = 0.8;
     double tracking_distance = 0.25;
-    double stopped_velocity = 0.02;
-    double stopped_angular_velocity = 0.05;
-    double stopped_duration = 0.2;
 
     explicit PlannerParams(const std::string &path = {})
     {
@@ -70,14 +66,10 @@ public:
             max_angular_velocity = v.value("max_angular_velocity", max_angular_velocity);
             max_acceleration = v.value("max_acceleration", max_acceleration);
             max_angular_acceleration = v.value("max_angular_acceleration", max_angular_acceleration);
-            max_rotation_acceleration = v.value("max_rotation_acceleration", max_rotation_acceleration);
             position_gain = v.value("position_gain", position_gain);
             lateral_gain = v.value("lateral_gain", lateral_gain);
             heading_gain = v.value("heading_gain", heading_gain);
             tracking_distance = v.value("tracking_distance", tracking_distance);
-            stopped_velocity = v.value("stopped_velocity", stopped_velocity);
-            stopped_angular_velocity = v.value("stopped_angular_velocity", stopped_angular_velocity);
-            stopped_duration = v.value("stopped_duration", stopped_duration);
         }
 
     }

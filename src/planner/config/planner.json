@@ -15,13 +15,9 @@
     "max_angular_velocity": 1.0,
     "max_acceleration": 0.4,
     "max_angular_acceleration": 1.5,
-    "max_rotation_acceleration": 2.0,
     "position_gain": 1.5,
     "lateral_gain": 2.0,
     "heading_gain": 0.8,
-    "tracking_distance": 0.25,
-    "stopped_velocity": 0.02,
-    "stopped_angular_velocity": 0.05,
-    "stopped_duration": 0.2
+    "tracking_distance": 0.25
   }
 }
