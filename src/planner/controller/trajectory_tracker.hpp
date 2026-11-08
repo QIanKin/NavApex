@@ -22,5 +22,9 @@ public:
 private:
     PlannerParams param_;
     int integration_intervals_;
+    double max_velocity_ = 0.22;
+    double position_gain_ = 1.5;
+    double lateral_gain_ = 2.0;
+    double tracking_distance_ = 0.25;
 };
 } // namespace navapex::planner

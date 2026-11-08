@@ -100,7 +100,8 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 | 感知外参、时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
 | 路径搜索 | `src/planner/path_plan/config/astar.json` |
 | 差速轨迹优化 | `src/planner/traj_opt/config/diff.json` |
-| 规划模式、全局与局部规划、控制跟踪 | `src/planner/config/planner.json` |
+| 规划模式、全局与局部规划、旋转及运动限制 | `src/planner/config/planner.json` |
+| 轨迹跟踪速度上限、位置增益、横向增益、前瞻距离 | `src/planner/controller/config/tracker.json` |
 | ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
 | 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
 

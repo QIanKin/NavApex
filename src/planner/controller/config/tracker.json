@@ -1,0 +1,6 @@
+{
+  "max_velocity": 0.22,
+  "position_gain": 1.5,
+  "lateral_gain": 2.0,
+  "tracking_distance": 0.25
+}

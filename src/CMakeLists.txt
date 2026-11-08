@@ -190,6 +190,8 @@ install(DIRECTORY planner/traj_opt/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY planner/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/planner
   FILES_MATCHING PATTERN "*.json")
+install(DIRECTORY planner/controller/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/controller
+  FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY planner/path_plan/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/path_plan
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY perception/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/perception
