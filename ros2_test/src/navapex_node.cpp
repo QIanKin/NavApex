@@ -100,7 +100,6 @@ public:
         cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(declare_parameter("cmd_vel_topic", "/cmd_vel"), 10);
         global_pub_ = create_publisher<nav_msgs::msg::Path>("/navapex/global_path", map_qos);
         local_pub_ = create_publisher<nav_msgs::msg::Path>("/navapex/local_path", 1);
-        initial_pub_ = create_publisher<nav_msgs::msg::Path>("/navapex/initial_path", 1);
         lookahead_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/navapex/lookahead", 1);
         status_pub_ = create_publisher<std_msgs::msg::String>("/navapex/status", map_qos);
         cancel_ = create_service<std_srvs::srv::Trigger>("/navapex/cancel",
@@ -439,17 +438,9 @@ private:
             double duration = result.trajectory.getTotalDuration();
             for (double t = 0; t < duration; t += 0.05) samples.push_back(result.trajectory.getPos(t));
             samples.push_back(result.trajectory.getPos(duration));
-            lookahead_pub_->publish(poseMessage(result.local_goal));
+            lookahead_pub_->publish(poseMessage(samples.back()));
         }
         local_pub_->publish(pathMessage(samples));
-        samples.clear();
-        if (result.initial_trajectory.getPieceNum() > 0)
-        {
-            double duration = result.initial_trajectory.getTotalDuration();
-            for (double t = 0; t < duration; t += 0.05) samples.push_back(result.initial_trajectory.getPos(t));
-            samples.push_back(result.initial_trajectory.getPos(duration));
-        }
-        initial_pub_->publish(pathMessage(samples));
         LOGI("ros2") << "local " << status << " v=" << (result.success ? result.velocity : 0)
                      << " w=" << (result.success ? result.angular_velocity : 0);
     }
@@ -573,7 +564,7 @@ private:
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr global_pub_, local_pub_, initial_pub_;
+    rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr global_pub_, local_pub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr lookahead_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
     rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr cancel_;

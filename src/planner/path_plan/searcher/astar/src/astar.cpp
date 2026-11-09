@@ -38,9 +38,11 @@ bool AStar::initializeSearch()
     resolution_ = input.map->resolution();
     if (!std::isfinite(resolution_) || resolution_ <= 0 ||
         !std::isfinite(input.radius) || input.radius < 0 ||
+        (input.ignore_goal_obstacles &&
+         (!std::isfinite(input.goal_ignore_radius) || input.goal_ignore_radius <= 0)) ||
         (!is_3d_ && start.z() != goal.z()))
     {
-        LOGE(SEARCHER_TAG) << "invalid resolution, radius or different planar endpoint heights";
+        LOGE(SEARCHER_TAG) << "invalid resolution, radius, goal ignore radius or different planar endpoint heights";
         return false;
     }
 
@@ -71,10 +73,10 @@ bool AStar::initializeSearch()
     }
 
     // 实际端点可能可通行，但所在格的格心碰撞；只在相邻格内寻找可直连的格心。
-    auto connectEndpoint = [&](const Eigen::Vector3d &point, Eigen::Vector3i &index)
+    auto connectEndpoint = [&](const Eigen::Vector3d &point, Eigen::Vector3i &index, bool allow_goal_relaxation)
     {
-        if (segmentFree(point, positionOf(index))) return true;
-        if (!footprintFree(point)) return false;
+        if (segmentFree(point, positionOf(index), allow_goal_relaxation)) return true;
+        if (!footprintFree(point, allow_goal_relaxation)) return false;
         Eigen::Vector3i original = index;
         double best = std::numeric_limits<double>::infinity();
         for (int x = -1; x <= 1; ++x)
@@ -84,7 +86,7 @@ bool AStar::initializeSearch()
                     Eigen::Vector3i candidate = original + Eigen::Vector3i(x, y, z);
                     if ((candidate.array() < 0).any() || (candidate.array() >= size_.array()).any()) continue;
                     double distance = (positionOf(candidate) - point).squaredNorm();
-                    if (distance < best && segmentFree(point, positionOf(candidate)))
+                    if (distance < best && segmentFree(point, positionOf(candidate), allow_goal_relaxation))
                     {
                         best = distance;
                         index = candidate;
@@ -92,7 +94,7 @@ bool AStar::initializeSearch()
                 }
         return std::isfinite(best);
     };
-    if (!connectEndpoint(start, first_) || !connectEndpoint(goal, last_))
+    if (!connectEndpoint(start, first_, false) || !connectEndpoint(goal, last_, true))
     {
         LOGW(SEARCHER_TAG) << "search endpoint or goal connection in collision";
         return false;
@@ -140,8 +142,11 @@ double AStar::heuristic(const Eigen::Vector3i &index) const
     return std::sqrt(3.0) * v[0] + std::sqrt(2.0) * (v[1] - v[0]) + v[2] - v[1];
 }
 
-bool AStar::footprintFree(const Eigen::Vector3d &position) const
+bool AStar::footprintFree(const Eigen::Vector3d &position, bool allow_goal_relaxation) const
 {
+    Eigen::Vector3d goal(input_->goal.x, input_->goal.y, input_->goal.z);
+    bool ignore_obstacles = allow_goal_relaxation && input_->ignore_goal_obstacles &&
+        (position - goal).squaredNorm() <= input_->goal_ignore_radius * input_->goal_ignore_radius;
     int radius = static_cast<int>(std::ceil(input_->radius / resolution_));
     int z_extent = is_3d_ ? radius : 0;
     // 半径向上取整到格，扫描圆形（二维）或球形（三维）范围内的格点。
@@ -151,19 +156,28 @@ bool AStar::footprintFree(const Eigen::Vector3d &position) const
             {
                 if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
                 Eigen::Vector3d sample = position + resolution_ * Eigen::Vector3d(dx, dy, dz);
+                if (ignore_obstacles)
+                {
+                    // 只放宽终点附近的占据限制，不允许车身越出地图。
+                    Eigen::Vector3d cell = (sample - origin_) / resolution_ + Eigen::Vector3d::Constant(0.5);
+                    for (int axis = 0; axis < (is_3d_ ? 3 : 2); ++axis)
+                        if (cell[axis] < 0 || cell[axis] >= size_[axis]) return false;
+                    continue;
+                }
                 if (input_->map->occupied({sample.x(), sample.y(), sample.z()})) return false;
             }
     return true;
 }
 
-bool AStar::segmentFree(const Eigen::Vector3d &start, const Eigen::Vector3d &goal) const
+bool AStar::segmentFree(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                        bool allow_goal_relaxation) const
 {
     double distance = ((goal - start) / resolution_).norm();
     int samples = std::max(2, static_cast<int>(std::ceil(distance * 2)));
     for (int i = 0; i <= samples; ++i)
     {
         Eigen::Vector3d position = start + (goal - start) * (static_cast<double>(i) / samples);
-        if (!footprintFree(position))
+        if (!footprintFree(position, allow_goal_relaxation))
             return false;
     }
     return true;

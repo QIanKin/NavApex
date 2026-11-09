@@ -54,7 +54,6 @@ int main(int argc, char **argv)
         coefficients(0, 4) = 0.35;
         coefficients(0, 5) = state.pose.position.x;
         result.trajectory.emplace_back(1.0, coefficients);
-        result.initial_trajectory = result.trajectory;
         replay::plan({{"stamp", state.stamp}, {"plan_id", i + 1}, {"state_id", i + 1}, {"map_id", i + 1},
             {"goal_id", 1}, {"goal", {2.8, 0, 0}}, {"state", replay::state(state)}, {"elapsed_ms", 2.5},
             {"accepted", i != 40}, {"status", i == 25 ? "planning_failed" : i == 40 ? "discarded_goal_changed" : "planning_success"}},

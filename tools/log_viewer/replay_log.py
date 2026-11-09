@@ -283,12 +283,11 @@ class ReplayLog:
         if plan:
             result["goal"] = plan.get("goal")
             result["plan"] = {k: v for k, v in plan.items() if k not in ("trajectory", "initial_trajectory")}
-            for name in ("trajectory", "initial_trajectory"):
-                try:
-                    result["plan"][name] = sample_trajectory(plan.get(name))
-                except (ValueError, TypeError, KeyError, OverflowError):
-                    result["plan"][name] = []
-                    warnings.append("轨迹系数损坏，已跳过该图层")
+            try:
+                result["plan"]["trajectory"] = sample_trajectory(plan.get("trajectory"))
+            except (ValueError, TypeError, KeyError, OverflowError):
+                result["plan"]["trajectory"] = []
+                warnings.append("轨迹系数损坏，已跳过该图层")
         pose_index = bisect.bisect_right(group["pose_times"], stamp)
         result["trace"] = [e["state"]["pose"] for e in group["pose"][max(0, pose_index-1000):pose_index]]
         diag = self._diagnostics_by_session.get(session, [])

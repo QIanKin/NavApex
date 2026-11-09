@@ -407,7 +407,6 @@ function draw() {
     const p = f.plan;
     if (p) {
       if (layers.globalPath) line(p.global_path, "#5a9cfb", 2);
-      if (layers.initial) line(p.initial_trajectory, "#f6bc6b", 2, true);
       if (layers.trajectory)
         line(
           p.trajectory,

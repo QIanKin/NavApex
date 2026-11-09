@@ -52,14 +52,6 @@ Visualization Manager:
         Value: /navapex/global_path
         Durability Policy: Transient Local
     - Class: rviz_default_plugins/Path
-      Name: Initial Polynomial
-      Enabled: true
-      Color: 255; 170; 50
-      Line Style: Lines
-      Line Width: 0.02
-      Topic:
-        Value: /navapex/initial_path
-    - Class: rviz_default_plugins/Path
       Name: Optimized Local Trajectory
       Enabled: true
       Color: 70; 240; 100

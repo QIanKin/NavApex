@@ -73,7 +73,6 @@ RViz 已配置 **Rolling Local Costmap**，订阅 `/navapex/local_costmap`，类
 | `/navapex/local_costmap` | `nav_msgs/OccupancyGrid` | 感知地图，保留最后一帧 |
 | `/goal_pose` | `geometry_msgs/PoseStamped` | RViz 目标位置与朝向 |
 | `/navapex/global_path` | `nav_msgs/Path` | 蓝色全局路径 |
-| `/navapex/initial_path` | `nav_msgs/Path` | 橙色初始多项式 |
 | `/navapex/local_path` | `nav_msgs/Path` | 绿色优化轨迹 |
 | `/navapex/lookahead` | `geometry_msgs/PoseStamped` | 局部目标 |
 | `/navapex/status` | `std_msgs/String` | 输入、规划和到达状态 |

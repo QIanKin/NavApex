@@ -36,7 +36,8 @@ VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const Robo
     Eigen::Vector3d pose(current.x, current.y, current.yaw);
     double linear_velocity = state.twist.linear.x, angular_velocity = state.twist.angular.z;
     double goal_distance = (goal - pose).head<2>().norm();
-    bool touches_goal = (plan.local_goal - goal).head<2>().norm() <= 1e-6;
+    Eigen::Vector3d endpoint = plan.trajectory.getJuncPos(plan.trajectory.getPieceNum());
+    bool touches_goal = (endpoint - goal).head<2>().norm() <= 1e-6;
 
     double sample = 0, distance = 0;
     auto durations = plan.trajectory.getDurations();

@@ -38,9 +38,10 @@ private:
 
     double heuristic(const Eigen::Vector3i &index) const;
 
-    bool footprintFree(const Eigen::Vector3d &position) const;
+    bool footprintFree(const Eigen::Vector3d &position, bool allow_goal_relaxation = true) const;
 
-    bool segmentFree(const Eigen::Vector3d &start, const Eigen::Vector3d &goal) const;
+    bool segmentFree(const Eigen::Vector3d &start, const Eigen::Vector3d &goal,
+                     bool allow_goal_relaxation = true) const;
 
     bool transitionFree(const Eigen::Vector3i &index, const Eigen::Vector3i &step) const;
 

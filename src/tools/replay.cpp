@@ -122,7 +122,7 @@ void plan(Json fields, const planner::LocalPlanResult &result,
     try
     {
         auto bytes = 4096 + fields.dump().size() + global_path.size() * sizeof(Eigen::Vector3d) +
-            (result.trajectory.getPieceNum() + result.initial_trajectory.getPieceNum()) * 256;
+            result.trajectory.getPieceNum() * 256;
         planner_tools::logReplay([fields = std::move(fields), result, global_path]() mutable
         {
             fields["v"] = 1;
@@ -130,9 +130,7 @@ void plan(Json fields, const planner::LocalPlanResult &result,
             fields["success"] = result.success;
             fields["goal_reached"] = result.goal_reached;
             fields["command"] = {result.success ? result.velocity : 0, result.success ? result.angular_velocity : 0};
-            fields["local_goal"] = {result.local_goal.x(), result.local_goal.y(), result.local_goal.z()};
             fields["trajectory"] = trajectory(result.trajectory);
-            fields["initial_trajectory"] = trajectory(result.initial_trajectory);
             fields["global_path_axes"] = {"x", "y", "z"};
             fields["global_path"] = Json::array();
             for (const auto &p : global_path) fields["global_path"].push_back({p.x(), p.y(), p.z()});

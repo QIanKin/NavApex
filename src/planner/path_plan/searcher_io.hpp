@@ -12,6 +12,8 @@ struct SearchInput
     Position3D goal;
     std::shared_ptr<const perception::OccupancyMap> map;
     double radius = 0;
+    bool ignore_goal_obstacles = false;
+    double goal_ignore_radius = 0.2;
 };
 
 struct SearchResult

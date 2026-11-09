@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -66,8 +67,8 @@ LocalPlanResult tick(Planner &planner, LocalPlanInput &input, double dt = 0.1)
     auto result = planner.planLocal(input);
     if (trace.is_open())
         trace << "local " << input.state.stamp << ' ' << result.success << ' ' << result.goal_reached << ' '
-              << result.velocity << ' ' << result.angular_velocity << ' ' << result.local_goal.transpose() << '\n'
-              << result.initial_trajectory << '\n' << result.trajectory << '\n';
+              << result.velocity << ' ' << result.angular_velocity << '\n'
+              << result.trajectory << '\n';
     return result;
 }
 
@@ -112,6 +113,51 @@ void reusableSearcher()
     check();
 }
 
+void goalObstacleSearchFlag()
+{
+    auto input = std::make_shared<path_plan::SearchInput>();
+    path_plan::SearcherInterface searcher("astar2d", input);
+    std::vector<std::uint8_t> costs(200, perception::Free);
+    costs[5 * 20 + 15] = perception::Lethal;
+    auto map = std::make_shared<perception::GridMap2D>(
+        perception::GridGeometry2D{0.1, 20, 10, 0, 0}, costs);
+    *input = {{0.25, 0.55, 0}, {1.55, 0.55, 0}, map, 0.1};
+    require(!searcher.search().success, "strict search must reject an occupied goal");
+    input->ignore_goal_obstacles = true;
+    auto result = searcher.search();
+    require(result.success &&
+            (result.path.back() - Eigen::Vector3d(1.55, 0.55, 0)).norm() < 1e-9,
+            "relaxed search must connect to the exact occupied goal");
+    require(map->cost(input->goal) == perception::Lethal,
+            "goal relaxation must not mutate the map used by optimization");
+    input->ignore_goal_obstacles = false;
+    require(!searcher.search().success, "goal relaxation must not leak into the next strict search");
+
+    input->goal.x = 1.65; // Free center, but its footprint overlaps the obstacle.
+    require(!searcher.search().success, "strict search must reject a colliding goal footprint");
+    input->ignore_goal_obstacles = true;
+    require(searcher.search().success, "relaxation must apply to the goal footprint and connecting edges");
+    input->start = {1.55, 0.55, 0};
+    require(!searcher.search().success, "a colliding start must remain invalid even inside the goal region");
+    input->start = {0.25, 0.55, 0};
+    input->goal = {1.95, 0.55, 0};
+    require(!searcher.search().success, "goal relaxation must not allow a footprint outside the map");
+    input->goal = {2.05, 0.55, 0};
+    require(!searcher.search().success, "goal relaxation must not allow an endpoint outside the map");
+
+    input->goal = {1.55, 0.55, 0};
+    for (double radius : {0.0, -0.1, std::numeric_limits<double>::infinity(),
+                          std::numeric_limits<double>::quiet_NaN()})
+    {
+        input->goal_ignore_radius = radius;
+        require(!searcher.search().success, "relaxed search must reject invalid region radii");
+    }
+    input->goal_ignore_radius = 0.2;
+    for (int y = 0; y < 10; ++y) costs[y * 20 + 8] = perception::Lethal;
+    input->map = std::make_shared<perception::GridMap2D>(map->geometry(), costs);
+    require(!searcher.search().success, "obstacles outside the goal region must still block search");
+}
+
 void startAlignment()
 {
     Planner planner(robot_model::RobotModel::create());
@@ -126,7 +172,7 @@ void startAlignment()
     input.state.twist = {};
     result = tick(planner, input);
     require(result.success && result.velocity == 0 && result.angular_velocity < 0 &&
-            result.trajectory.getPieceNum() == 0 && result.initial_trajectory.getPieceNum() == 0,
+            result.trajectory.getPieceNum() == 0,
             "stopped start must rotate immediately without trajectory optimization");
     double step = planner.param().max_angular_acceleration * planner.param().control_period;
     require(std::abs(result.angular_velocity + step) < 1e-9,
@@ -193,8 +239,18 @@ void failureRecovery()
     auto result = tick(planner, input);
     require(result.success && result.trajectory.getPieceNum() > 0, "navigation must produce a trajectory");
     result = tick(planner, input);
-    require(result.success && result.initial_trajectory.getPieceNum() > 0,
+    require(result.success && result.trajectory.getPieceNum() > 0,
             "navigation must support warm starts");
+    result = tick(planner, input, result.trajectory.getTotalDuration() + 1);
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "expired trajectories must restart with a fresh search");
+    result = tick(planner, input, -1);
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "a backwards timestamp must restart without sampling before the old trajectory");
+    planner.discardWarmStart();
+    result = tick(planner, input);
+    require(result.success && result.trajectory.getPieceNum() > 0,
+            "discarding an active trajectory must allow a fresh local plan");
     auto free = input.map;
     input.map = makeMap(true);
     for (int i = 0; i < 2; ++i)
@@ -327,7 +383,7 @@ void oppositeStartAndReplan()
     tick(planner, input);
     auto result = tick(planner, input, 0.3);
     require(result.success && result.velocity == 0 && std::abs(result.angular_velocity) > 0 &&
-            result.trajectory.getPieceNum() == 0 && result.initial_trajectory.getPieceNum() == 0,
+            result.trajectory.getPieceNum() == 0,
             "an opposite-facing robot must rotate before trajectory optimization");
 
     planner::GlobalPlanInput global{input.map, {0, 0, pi}, {-2, 0, pi / 2}};
@@ -365,8 +421,7 @@ void startAlignmentUsesCurrentState()
     plan(planner, input);
     setYaw(input, pi); // Facing away now, despite the aligned global-plan start.
     auto result = tick(planner, input);
-    require(result.success && result.velocity == 0 && result.trajectory.getPieceNum() == 0 &&
-            result.initial_trajectory.getPieceNum() == 0,
+    require(result.success && result.velocity == 0 && result.trajectory.getPieceNum() == 0,
             "current heading must trigger initial rotation even when global start yaw was aligned");
     result = tick(planner, input, 0.3);
     require(result.success && result.velocity == 0 && std::abs(result.angular_velocity) > 0,
@@ -395,6 +450,7 @@ int main(int argc, char **argv)
         trace << std::setprecision(17);
     }
     reusableSearcher();
+    goalObstacleSearchFlag();
     startAlignment();
     goalAlignment();
     failureRecovery();

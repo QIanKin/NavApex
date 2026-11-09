@@ -21,7 +21,7 @@ public:
     const PlannerParams &param() const;
     
     void reset();
-    
+
     void discardWarmStart();
 
 private:
@@ -46,14 +46,13 @@ private:
     std::shared_ptr<traj_opt::OptimizerInput> optimizer_input_;
     std::unique_ptr<traj_opt::OptimizerInterface> optimizer_;
     std::shared_ptr<const robot_model::RobotModel> robot_;
-    std::shared_ptr<const perception::OccupancyMap> cached_map_;
     std::shared_ptr<const map::EsdfMap2D> esdf_;
     std::vector<Eigen::Vector3d> global_path_;
     std::vector<double> path_lengths_;
     Eigen::Vector3d goal_ = Eigen::Vector3d::Zero();
     double progress_ = 0;
     poly_traj::Trajectory<3> previous_trajectory_;
-    double previous_start_time_ = 0, previous_target_distance_ = 0;
+    double previous_start_time_ = 0, previous_aim_distance_ = 0;
     bool force_search_ = false;
     MotionPhase phase_ = MotionPhase::NewPath;
     double alignment_yaw_ = 0;

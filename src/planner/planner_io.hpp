@@ -35,9 +35,7 @@ struct LocalPlanResult
     bool goal_reached = false;
     double velocity = 0;
     double angular_velocity = 0;
-    Eigen::Vector3d local_goal = Eigen::Vector3d::Zero();
     poly_traj::Trajectory<3> trajectory;
-    poly_traj::Trajectory<3> initial_trajectory;
 };
 
 } // namespace navapex::planner
