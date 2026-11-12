@@ -221,9 +221,11 @@ PerceptionResult Lidar2DProcessor::update(const PerceptionInput &input)
     if (!validateTiming(scan, input.state, input.now)) return {};
     
     // 1.移动窗口
-    moveWindow(toPosition2D(input.state.pose));
-    auto pose = toPose2D(input.state.pose);
-    Position2D laser_origin = transformPoint(pose, toPosition2D(param_.base_from_laser));
+    moveWindow(input.state.pose.position.toPlanar());
+    auto map_from_base = input.state.pose.toPlanar();
+    const auto &sensor_config = input.robot->lidar2D();
+    const Pose2D base_from_laser = sensor_config.base_from_sensor;
+    Position2D laser_origin = map_from_base.localToParent(base_from_laser.position);
     
     std::vector<std::size_t> hits;
     hits.reserve(scan.ranges.size());
@@ -231,7 +233,7 @@ PerceptionResult Lidar2DProcessor::update(const PerceptionInput &input)
     {
         // 2.判段是否有回波
         double range = scan.ranges[i];
-        bool no_return = (range == scan.range_max) || (param_.inf_is_free && std::isinf(range) && range > 0);
+        bool no_return = (range == scan.range_max) || (sensor_config.inf_is_free && std::isinf(range) && range > 0);
         if (!no_return && (!std::isfinite(range) || range < scan.range_min || range > scan.range_max)) // 清除无效回波
         {
             continue;
@@ -241,14 +243,14 @@ PerceptionResult Lidar2DProcessor::update(const PerceptionInput &input)
         double c = std::cos(angle);
         double s = std::sin(angle);
         double ray_range = no_return ? scan.range_max : range;
-        Position2D base_endpoint = transformPoint(param_.base_from_laser, {ray_range * c, ray_range * s});
-        if (!no_return && input.robot->contains(base_endpoint, param_.self_filter_padding))  // 清除打到自身的回波
+        Position2D base_endpoint = base_from_laser.localToParent({ray_range * c, ray_range * s});
+        if (!no_return && input.robot->contains(base_endpoint, sensor_config.self_filter_padding))  // 清除打到自身的回波
         {
             continue;
         }
 
         // 4.射线转到map
-        Position2D endpoint = transformPoint(pose, base_endpoint);
+        Position2D endpoint = map_from_base.localToParent(base_endpoint);
 
         // 5.射线遍历网格
         clearRay(laser_origin, endpoint);

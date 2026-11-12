@@ -32,6 +32,13 @@ namespace navapex::ros2
 using Steady = std::chrono::steady_clock;
 using MapPtr = std::shared_ptr<const perception::OccupancyMap>;
 
+Pose3D pose3DFromPlanar(Pose2D pose)
+{
+    const double half_yaw = pose.yaw / 2;
+    return {{pose.position.x, pose.position.y, 0},
+            {std::cos(half_yaw), 0, 0, std::sin(half_yaw)}};
+}
+
 class NavigationNode final : public rclcpp::Node
 {
 public:
@@ -57,19 +64,25 @@ public:
         logging.max_file_bytes = static_cast<std::size_t>(log_mb) * 1024 * 1024;
         logging.max_files = static_cast<std::size_t>(log_files);
         planner_tools::initLog(logging);
+        auto config = planner::PlannerConfig::defaultConfig();
         robot_ = robot_model::RobotModel::create();
-        planner_ = std::make_unique<planner::Planner>(robot_);
-        tracker_ = std::make_unique<planner::TrajectoryTracker>(planner_->param());
+        if (robot_->plannerType() != "diff")
+            throw std::invalid_argument("Unknown planner type: " + robot_->plannerType());
+        planner_ = std::make_unique<planner::DiffPlanner>(robot_, config.planner);
+        tracker_ = std::make_unique<planner::TrajectoryTracker>(planner_->param(), robot_);
         perception_ = std::make_unique<perception::PerceptionInterface>("lidar2d");
         const auto &lidar = dynamic_cast<const perception::Lidar2DParams &>(perception_->param());
+        const auto &sensor = robot_->lidar2D();
+        const auto &sensor_pose = sensor.base_from_sensor;
         planner_tools::setReplayMetadata(nlohmann::json({{"v", 1}, {"frame", frame_},
             {"robot", {{"shape", robot_->type()}, {"radius", robot_->radius()}}},
-            {"planner_type", planner_->param().type}, {"source_clock", "ros"},
+            {"planner_type", robot_->plannerType()}, {"source_clock", "ros"},
             {"trajectory_axes", {"x", "y", "yaw"}},
             {"perception", {{"resolution", lidar.resolution}, {"width", lidar.width}, {"height", lidar.height},
+                {"inf_is_free", sensor.inf_is_free}, {"self_filter_padding", sensor.self_filter_padding},
                 {"forbidden_radius", lidar.forbidden_radius}, {"inflation_radius", lidar.inflation_radius},
                 {"cost_scaling", lidar.cost_scaling}, {"track_unknown_space", lidar.track_unknown_space},
-                {"base_from_laser", {lidar.base_from_laser.x, lidar.base_from_laser.y, lidar.base_from_laser.yaw}}}}}).dump());
+                {"base_from_laser", {sensor_pose.position.x, sensor_pose.position.y, sensor_pose.yaw}}}}}).dump());
         auto map_qos = rclcpp::QoS(1).reliable().transient_local();
         map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/map", map_qos);
         costmap_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/navapex/local_costmap", map_qos);
@@ -118,7 +131,7 @@ public:
         double goal_yaw = declare_parameter("goal_yaw", 0.0);
         if (declare_parameter("auto_start", false))
         {
-            goal_ << goal_x, goal_y, goal_yaw;
+            goal_ = {goal_x, goal_y, goal_yaw};
             has_goal_ = true;
             ++goal_version_;
             replay::event({{"event", "goal"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
@@ -168,7 +181,7 @@ private:
     {
         MapPtr global, local;
         RobotState state;
-        Eigen::Vector3d goal;
+        Pose2D goal;
         std::uint64_t version;
         Steady::time_point captured, odom_received, map_received;
         std::uint64_t state_id = 0, map_id = 0, plan_id = 0, clock_epoch = 0;
@@ -199,7 +212,7 @@ private:
         return message;
     }
 
-    nav_msgs::msg::Path globalPathMessage(const std::vector<Eigen::Vector3d> &positions) const
+    nav_msgs::msg::Path globalPathMessage(const std::vector<Position3D> &positions) const
     {
         nav_msgs::msg::Path message;
         message.header.frame_id = frame_;
@@ -208,9 +221,9 @@ private:
         {
             geometry_msgs::msg::PoseStamped pose;
             pose.header = message.header;
-            pose.pose.position.x = position.x();
-            pose.pose.position.y = position.y();
-            pose.pose.position.z = position.z();
+            pose.pose.position.x = position.x;
+            pose.pose.position.y = position.y;
+            pose.pose.position.z = position.z;
             pose.pose.orientation.w = 1;
             message.poses.push_back(pose);
         }
@@ -231,21 +244,23 @@ private:
             auto pose = input;
             if (pose.header.frame_id.empty()) pose.header.frame_id = frame_;
             if (pose.header.frame_id != frame_) pose = tf_.transform(pose, frame_, tf2::durationFromSec(0.1));
-            Eigen::Vector3d goal(pose.pose.position.x, pose.pose.position.y, tf2::getYaw(pose.pose.orientation));
-            if (!goal.allFinite()) throw std::invalid_argument("Non-finite goal");
+            Pose2D goal{{pose.pose.position.x, pose.pose.position.y}, tf2::getYaw(pose.pose.orientation)};
+            if (!std::isfinite(goal.position.x) || !std::isfinite(goal.position.y) || !std::isfinite(goal.yaw))
+                throw std::invalid_argument("Non-finite goal");
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 goal_ = goal;
                 has_goal_ = true;
                 ++goal_version_;
                 replay::event({{"event", "goal"}, {"stamp", now().seconds()}, {"clock_epoch", clock_epoch_},
-                               {"goal_id", goal_version_}, {"goal", {goal.x(), goal.y(), goal.z()}},
+                               {"goal_id", goal_version_},
+                               {"goal", {goal.position.x, goal.position.y, goal.yaw}},
                                {"status", "new_goal"}});
                 requested_ = true;
                 wake_.notify_one();
             }
             publishStatus("new_goal");
-            LOGI("ros2") << "new goal=" << goal.transpose();
+            LOGI("ros2") << "new goal=" << goal.toEigen().transpose();
         }
         catch (const std::exception &error) { RCLCPP_WARN(get_logger(), "Goal rejected: %s", error.what()); }
     }
@@ -270,8 +285,9 @@ private:
             state.twist = {{twist.linear.x, twist.linear.y, twist.linear.z},
                            {twist.angular.x, twist.angular.y, twist.angular.z}};
             state.stamp = rclcpp::Time(input.header.stamp).seconds();
-            auto planar_pose = toPose2D(state.pose);
-            if (!std::isfinite(planar_pose.x) || !std::isfinite(planar_pose.y) || !std::isfinite(planar_pose.yaw) ||
+            auto planar_pose = state.pose.toPlanar();
+            if (!std::isfinite(planar_pose.position.x) || !std::isfinite(planar_pose.position.y) ||
+                !std::isfinite(planar_pose.yaw) ||
                 !std::isfinite(state.twist.linear.x) || !std::isfinite(state.twist.angular.z)) return;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -283,7 +299,7 @@ private:
                     state.acceleration.linear.x = std::clamp((state.twist.linear.x - state_.twist.linear.x) / dt,
                         -control.max_acceleration, control.max_acceleration);
                     state.acceleration.angular.z = std::clamp((state.twist.angular.z - state_.twist.angular.z) / dt,
-                        -control.max_angular_acceleration, control.max_angular_acceleration);
+                        -control.max_rotation_acceleration, control.max_rotation_acceleration);
                 }
                 // 差速车体的横向运动加速度，包含转弯的向心分量。
                 state.acceleration.linear.y = state.twist.linear.x * state.twist.angular.z;
@@ -405,7 +421,7 @@ private:
             result.success = false;
             status = "planning_timeout";
             LOGW("ros2") << "planning_timeout age=" << age(snapshot.captured);
-            planner_->discardWarmStart();
+            planner_->cancelWarmStart();
         }
         if (!status)
             status = result.goal_reached ? "goal_reached" : (result.success ? "planning_success" : "planning_failed");
@@ -452,9 +468,9 @@ private:
         replay::plan({{"stamp", std::isfinite(snapshot.state.stamp) ? snapshot.state.stamp : now().seconds()}, {"clock_epoch", snapshot.clock_epoch},
             {"plan_id", snapshot.plan_id}, {"state_id", snapshot.state_id}, {"map_id", snapshot.map_id},
             {"state", snapshot.state_id ? replay::state(snapshot.state) : nlohmann::json(nullptr)}, {"goal_id", snapshot.version},
-            {"goal", {snapshot.goal.x(), snapshot.goal.y(), snapshot.goal.z()}},
+            {"goal", {snapshot.goal.position.x, snapshot.goal.position.y, snapshot.goal.yaw}},
             {"status", status}, {"accepted", accepted}, {"elapsed_ms", age(snapshot.captured) * 1000}},
-            result, planner_->globalPath());
+            result, global_plan_.path);
     }
 
     void planningLoop()
@@ -483,11 +499,11 @@ private:
                 {
                     planner::LocalPlanResult result;
                     LOGW("ros2") << "waiting_for_fresh_inputs";
-                    planner_->discardWarmStart();
+                    planner_->cancelWarmStart();
                     storeResult(snapshot, result, "waiting_for_fresh_inputs");
                     continue;
                 }
-                if (planned_version != snapshot.version || planner_->globalPath().empty())
+                if (planned_version != snapshot.version || global_plan_.path.empty())
                 {
                     if (planned_version == snapshot.version && failed_global == snapshot.global)
                     {
@@ -496,9 +512,11 @@ private:
                     }
                     planner::GlobalPlanInput input;
                     input.map = snapshot.global;
-                    input.start = toPose2D(snapshot.state.pose);
-                    input.goal = {snapshot.goal.x(), snapshot.goal.y(), snapshot.goal.z()};
-                    auto global = planner_->planGlobal(input);
+                    input.start = snapshot.state.pose;
+                    input.goal = pose3DFromPlanar(snapshot.goal);
+                    global_plan_ = {};
+                    global_plan_ = planner_->planGlobal(input);
+                    const auto &global = global_plan_;
                     planned_version = snapshot.version;
                     if (!current(snapshot.version))
                     {
@@ -544,6 +562,7 @@ private:
     tf2_ros::TransformListener listener_;
     std::shared_ptr<const robot_model::RobotModel> robot_;
     std::unique_ptr<planner::Planner> planner_;
+    planner::GlobalPlanResult global_plan_;
     std::unique_ptr<planner::TrajectoryTracker> tracker_;
     std::unique_ptr<perception::PerceptionInterface> perception_;
     std::deque<RecordedState> state_history_;
@@ -554,7 +573,7 @@ private:
     bool stopping_ = false, requested_ = false, has_goal_ = false, have_state_ = false, publish_stop_ = false;
     std::uint64_t goal_version_ = 0, command_version_ = 0;
     std::uint64_t state_id_ = 0, scan_id_ = 0, map_id_ = 0, plan_id_ = 0, clock_epoch_ = 0;
-    Eigen::Vector3d goal_ = Eigen::Vector3d::Zero();
+    Pose2D goal_;
     RobotState state_;
     MapPtr global_map_, local_map_;
     Steady::time_point odom_received_{}, map_received_{}, command_received_{};

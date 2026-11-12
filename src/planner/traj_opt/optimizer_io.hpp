@@ -12,13 +12,13 @@ namespace navapex::traj_opt
 
 struct TrajectoryBoundary
 {
-    Eigen::Vector3d position = Eigen::Vector3d::Zero();
-    Eigen::Vector3d velocity = Eigen::Vector3d::Zero();
-    Eigen::Vector3d acceleration = Eigen::Vector3d::Zero();
+    Eigen::Vector3d q = Eigen::Vector3d::Zero();
+    Eigen::Vector3d dq = Eigen::Vector3d::Zero();
+    Eigen::Vector3d ddq = Eigen::Vector3d::Zero();
     Eigen::Matrix3d matrix() const
     {
         Eigen::Matrix3d m;
-        m << position, velocity, acceleration;
+        m << q, dq, ddq;
         return m;
     }
 };

@@ -1,6 +1,5 @@
 #include "trajectory_tracker.hpp"
 
-#include <params/diff_params.hpp>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -8,36 +7,38 @@
 
 namespace navapex::planner
 {
-TrajectoryTracker::TrajectoryTracker(const PlannerParams &param) : param_(param)
+TrajectoryTracker::TrajectoryTracker(const PlannerParams &param,
+                                     std::shared_ptr<const robot_model::RobotModel> robot) : param_(param)
 {
-    auto path = std::filesystem::path(__FILE__).parent_path().parent_path() / "traj_opt" / "config" / "diff.json";
-    integration_intervals_ = traj_opt::DiffParams(path.string()).integration_intervals;
+    if (!robot) throw std::invalid_argument("TrajectoryTracker requires a robot model");
+    robot_max_velocity_ = robot->limits().max_linear_velocity;
+    integration_intervals_ = 12;
 
-    auto config_path = std::filesystem::path(__FILE__).parent_path() / "config" / "tracker.json";
-    std::ifstream stream(config_path);
-    if (!stream) throw std::invalid_argument("Cannot open config: " + config_path.string());
+    auto tracker_path = std::filesystem::path(__FILE__).parent_path() / "config" / "tracker.json";
+    std::ifstream stream(tracker_path);
+    if (!stream) throw std::invalid_argument("Cannot open config: " + tracker_path.string());
     nlohmann::json config;
     stream >> config;
-    max_velocity_ = config.value("max_velocity", max_velocity_);
+    integration_intervals_ = config.value("integration_intervals", integration_intervals_);
     position_gain_ = config.value("position_gain", position_gain_);
     lateral_gain_ = config.value("lateral_gain", lateral_gain_);
     tracking_distance_ = config.value("tracking_distance", tracking_distance_);
 }
 
 VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const RobotState &state,
-                                         const Eigen::Vector3d &goal) const
+                                         const Pose2D &goal) const
 {
     VelocityCommand result;
     if (!plan.success || plan.goal_reached || plan.trajectory.getPieceNum() == 0)
         return result;
 
     const auto &control = param_;
-    auto current = toPose2D(state.pose);
-    Eigen::Vector3d pose(current.x, current.y, current.yaw);
+    auto current = state.pose.toPlanar();
+    Eigen::Vector3d pose = current.toEigen();
     double linear_velocity = state.twist.linear.x, angular_velocity = state.twist.angular.z;
-    double goal_distance = (goal - pose).head<2>().norm();
+    double goal_distance = (Eigen::Vector2d(goal.position.x, goal.position.y) - pose.head<2>()).norm();
     Eigen::Vector3d endpoint = plan.trajectory.getJuncPos(plan.trajectory.getPieceNum());
-    bool touches_goal = (endpoint - goal).head<2>().norm() <= 1e-6;
+    bool touches_goal = (endpoint.head<2>() - Eigen::Vector2d(goal.position.x, goal.position.y)).norm() <= 1e-6;
 
     double sample = 0, distance = 0;
     auto durations = plan.trajectory.getDurations();
@@ -68,10 +69,10 @@ VelocityCommand TrajectoryTracker::track(const LocalPlanResult &plan, const Robo
     double w = lateral_gain_ * v * (-s * error.x() + c * error.y()) / std::max(0.01, error.squaredNorm());
     v = std::clamp(v, linear_velocity - control.max_acceleration * control.control_period,
                      linear_velocity + control.max_acceleration * control.control_period);
-    w = std::clamp(w, angular_velocity - control.max_angular_acceleration * control.control_period,
-                     angular_velocity + control.max_angular_acceleration * control.control_period);
-    result.velocity = std::clamp(v, 0.0, max_velocity_);
-    result.angular_velocity = std::clamp(w, -control.max_angular_velocity, control.max_angular_velocity);
+    w = std::clamp(w, angular_velocity - control.max_rotation_acceleration * control.control_period,
+                     angular_velocity + control.max_rotation_acceleration * control.control_period);
+    result.velocity = std::clamp(v, 0.0, robot_max_velocity_);
+    result.angular_velocity = std::clamp(w, -control.max_rotation_velocity, control.max_rotation_velocity);
     return result;
 }
 } // namespace navapex::planner

@@ -76,6 +76,15 @@ Diff_Optimizer::Diff_Optimizer(DiffParams c,
                                : param_(std::move(c))
 {
     state_.input = std::move(input);
+    if (state_.input->robot_)
+    {
+        const auto &limits = state_.input->robot_->limits();
+        param_.max_velocity = std::min(param_.max_velocity, limits.max_linear_velocity);
+        param_.max_acceleration = std::min(param_.max_acceleration, limits.max_linear_acceleration);
+        param_.max_angular_velocity = std::min(param_.max_angular_velocity, limits.max_angular_velocity);
+        param_.max_angular_acceleration = std::min(param_.max_angular_acceleration,
+                                                   limits.max_angular_acceleration);
+    }
     LOGD(OPTIMIZER_TAG) << "create diff_optimizer success";
 }
 
@@ -116,14 +125,14 @@ bool Diff_Optimizer::initializePlanning()
 
     // double clearance = 0;
     // // 检查起点终点是否位于障碍物内
-    // Pose2D start{input.start.position.x(), input.start.position.y(), input.start.position.z()};
+    // Pose2D start{input.start.q.x(), input.start.q.y(), input.start.q.z()};
     // input.robot_->clearance(start, *input.esdf, clearance);
     // if (clearance < 0)
     // {
     //     LOGW(OPTIMIZER_TAG) << "start in collision or outside esdf";
     //     return false;
     // }
-    // Pose2D goal{input.goal.position.x(), input.goal.position.y(), input.goal.position.z()};
+    // Pose2D goal{input.goal.q.x(), input.goal.q.y(), input.goal.q.z()};
     // input.robot_->clearance(goal, *input.esdf, clearance);
     // if (clearance < 0)
     // {

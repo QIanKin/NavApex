@@ -1,5 +1,4 @@
 {
-  "type": "diff",
   "local": {
     "lookahead_distance": 1.2,
     "waypoint_spacing": 0.4,
@@ -11,9 +10,9 @@
   },
   "controller": {
     "period": 0.1,
-    "max_angular_velocity": 1.0,
+    "max_rotation_velocity": 1.0,
     "max_acceleration": 0.4,
-    "max_angular_acceleration": 1.5,
+    "max_rotation_acceleration": 1.5,
     "heading_gain": 0.8
   }
 }

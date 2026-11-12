@@ -2,6 +2,7 @@
 
 #include <planner/params/planner_params.hpp>
 #include <planner/planner_io.hpp>
+#include <robot_model/robot_model.hpp>
 
 namespace navapex::planner
 {
@@ -14,17 +15,18 @@ struct VelocityCommand
 class TrajectoryTracker
 {
 public:
-    explicit TrajectoryTracker(const PlannerParams &param);
+    explicit TrajectoryTracker(const PlannerParams &param,
+                               std::shared_ptr<const robot_model::RobotModel> robot);
 
     VelocityCommand track(const LocalPlanResult &plan, const RobotState &state,
-                          const Eigen::Vector3d &goal) const;
+                          const Pose2D &goal) const;
 
 private:
     PlannerParams param_;
     int integration_intervals_;
-    double max_velocity_ = 0.22;
     double position_gain_ = 1.5;
     double lateral_gain_ = 2.0;
     double tracking_distance_ = 0.25;
+    double robot_max_velocity_ = 0.22;
 };
 } // namespace navapex::planner

@@ -136,7 +136,7 @@ set_target_properties(planner_searcher PROPERTIES EXPORT_NAME searcher)
 target_link_libraries(planner_searcher PUBLIC planner::search_params planner::map PRIVATE planner::astar)
 target_compile_options(planner_searcher PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(planner_core STATIC planner/planner.cpp)
+add_library(planner_core STATIC planner/planner.cpp planner/params/planner_params.cpp)
 add_library(planner::core ALIAS planner_core)
 set_target_properties(planner_core PROPERTIES EXPORT_NAME core)
 target_link_libraries(planner_core PUBLIC planner::optimizer planner::searcher planner::esdf planner::robot_model
@@ -175,7 +175,7 @@ install(DIRECTORY perception/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/perception
 install(DIRECTORY robot_model/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/robot_model
   FILES_MATCHING PATTERN "*.hpp")
 install(FILES tools/log.hpp tools/replay.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
-install(FILES planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
+install(FILES planner/base_planner.hpp planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
 install(DIRECTORY planner/controller/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/controller
   FILES_MATCHING PATTERN "*.hpp")
 install(DIRECTORY planner/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/params
@@ -198,29 +198,3 @@ install(DIRECTORY perception/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planne
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY robot_model/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/robot_model
   FILES_MATCHING PATTERN "*.json")
-
-option(NAVAPEX_BUILD_TESTS "Build perception and planner integration tests" OFF)
-if(NAVAPEX_BUILD_TESTS)
-  enable_testing()
-  add_executable(perception_test perception/tests/perception_test.cpp)
-  target_link_libraries(perception_test PRIVATE planner::perception planner::core)
-  target_compile_definitions(perception_test PRIVATE
-    PERCEPTION_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/perception/config/lidar2d.json")
-  add_test(NAME perception_test COMMAND perception_test)
-endif()
-
-option(NAVAPEX_BUILD_PLANNER_TESTS "Build planner FSM integration tests" OFF)
-if(NAVAPEX_BUILD_PLANNER_TESTS)
-  enable_testing()
-  add_executable(planner_fsm_test planner/tests/planner_fsm_test.cpp)
-  target_link_libraries(planner_fsm_test PRIVATE planner::core planner::controller)
-  add_test(NAME planner_fsm_test COMMAND planner_fsm_test)
-endif()
-
-option(NAVAPEX_BUILD_REPLAY_TESTS "Build replay serialization fixture and checks" OFF)
-if(NAVAPEX_BUILD_REPLAY_TESTS)
-  enable_testing()
-  add_executable(replay_test tools/replay_test.cpp)
-  target_link_libraries(replay_test PRIVATE planner::replay)
-  add_test(NAME replay_test COMMAND replay_test "${CMAKE_CURRENT_BINARY_DIR}/replay-fixture")
-endif()

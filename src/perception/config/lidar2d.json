@@ -5,11 +5,6 @@
     "height": 160,
     "track_unknown_space": false
   },
-  "sensor": {
-    "base_from_laser": { "x": -0.032, "y": 0, "yaw": 0 },
-    "inf_is_free": true,
-    "self_filter_padding": 0.02
-  },
   "inflation": {
     "forbidden_radius": 0.0,
     "radius": 0.65,

@@ -10,8 +10,6 @@ namespace navapex::planner
 class PlannerParams
 {
 public:
-    std::string type = "diff";
-
     // 局部规划
     double lookahead_distance = 1.2;
     double waypoint_spacing = 0.4;
@@ -23,26 +21,23 @@ public:
 
     // 旋转控制与运动限制
     double control_period = 0.1;
-    double max_angular_velocity = 1.0;
+    double max_rotation_velocity = 1.0;
     double max_acceleration = 0.4;
-    double max_angular_acceleration = 1.5;
+    double max_rotation_acceleration = 1.5;
     double heading_gain = 0.8;
 
-    explicit PlannerParams(const std::string &path = {})
+    PlannerParams() = default;
+    explicit PlannerParams(const std::string &path)
     {
-        if (!path.empty())
-        {
-            std::ifstream stream(path);
-            if (!stream) throw std::invalid_argument("Cannot open config: " + path);
-            stream >> json_;
-        }
+        std::ifstream stream(path);
+        if (!stream) throw std::invalid_argument("Cannot open config: " + path);
+        stream >> json_;
         read();
     }
 
     void read()
     {
         const auto &json = json_;
-        type = json.value("type", type);
         if (json.contains("local"))
         {
             const auto &v = json.at("local");
@@ -58,9 +53,9 @@ public:
         {
             const auto &v = json.at("controller");
             control_period = v.value("period", control_period);
-            max_angular_velocity = v.value("max_angular_velocity", max_angular_velocity);
+            max_rotation_velocity = v.value("max_rotation_velocity", max_rotation_velocity);
             max_acceleration = v.value("max_acceleration", max_acceleration);
-            max_angular_acceleration = v.value("max_angular_acceleration", max_angular_acceleration);
+            max_rotation_acceleration = v.value("max_rotation_acceleration", max_rotation_acceleration);
             heading_gain = v.value("heading_gain", heading_gain);
         }
 
@@ -68,5 +63,14 @@ public:
 
 private:
     nlohmann::json json_ = nlohmann::json::object();
+};
+
+// Loaded once by the application layer. Component configuration locations are
+// fixed by the module layout and are not part of this user-facing object.
+struct PlannerConfig
+{
+    PlannerParams planner;
+
+    static PlannerConfig defaultConfig();
 };
 } // namespace navapex::planner

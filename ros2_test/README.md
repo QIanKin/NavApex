@@ -91,24 +91,24 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 
 ## 配置
 
-所有核心参数只在所属模块的 `config` 下维护，模块自行读取，不接受环境变量、launch 参数或配置目录路径覆盖：
+组件参数仍按职责分别维护；应用入口固定加载各模块配置，由 RobotModel 选择 planner，配置文件路径不可覆盖：
 
 | 配置内容 | 项目根目录下的文件 |
 | --- | --- |
-| 机器人形状、尺寸 | `src/robot_model/config/robot.json` |
-| 感知外参、时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
+| 机器人形状、尺寸、雷达外参/回波解释/自体过滤边距、运动能力上限、planner_type | `src/robot_model/config/robot.json` |
+| 感知时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
 | 路径搜索 | `src/planner/path_plan/config/astar.json` |
 | 差速轨迹优化 | `src/planner/traj_opt/config/diff.json` |
-| 规划模式、全局与局部规划、旋转及运动限制 | `src/planner/config/planner.json` |
+| 局部规划、旋转及运动限制 | `src/planner/config/planner.json` |
 | 轨迹跟踪速度上限、位置增益、横向增益、前瞻距离 | `src/planner/controller/config/tracker.json` |
 | ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
 | 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
 
-ROS 层通过 `Planner(robot)` 创建规划器。规划器固定读取 `planner.json`，由其中的 `type` 统一选择内层搜索器和优化器；当前 `diff` 对应 `astar2d` 搜索与 `diff` 优化器。
+ROS 层通过 params 中的 `PlannerConfig::defaultConfig()` 固定读取 `src/planner/config/planner.json`，在节点初始化时根据 RobotModel 的 `planner_type` 选择实现，直接通过 `DiffPlanner(robot, config.planner)` 构造规划器；`planner_type` 在 `src/robot_model/config/robot.json` 中配置，默认 `diff`，对应 `DiffPlanner`、`astar2d` 搜索与 `diff` 优化器。配置路径不可从 ROS 参数或配置文件覆盖。
 
-`ros2_test` 不保存核心参数副本。全局地图保留从 world 静态碰撞几何生成的流程，独立读取 `ros2_test/config/global_map.json`，不读取感知配置。核心模块直接读取源目录中的配置文件，修改 JSON 后重启即可生效；重新执行启动脚本会在全局地图配置或 world 改动时重新生成全局地图。修改 ROS YAML 后也通过启动脚本重新安装。
+`ros2_test` 不保存核心参数副本。全局地图保留从 world 静态碰撞几何生成的流程，独立读取 `ros2_test/config/global_map.json`，不读取感知配置。各模块按固定位置读取自己的配置，修改 JSON 后重启即可生效；重新执行启动脚本会在全局地图配置或 world 改动时重新生成全局地图。修改 ROS YAML 后也通过启动脚本重新安装。
 
-当前保留仿真已测参数：机器人半径 0.125 米，雷达外参 `(-0.032, 0, 0)`，`inf_is_free=true`，禁行半径 0.0 米，软膨胀半径 0.65 米；差速优化积分间隔数 12、求解最多 120 次迭代、障碍权重 50000。`forbidden_radius` 和膨胀 `radius` 独立配置，不从机器人半径推导。
+当前保留仿真已测参数：机器人半径 0.125 米，雷达外参 `(-0.032, 0, 0)`，`inf_is_free=true`，自体过滤边距 0.02 米，禁行半径 0.0 米，软膨胀半径 0.65 米；差速优化积分间隔数 12、求解最多 120 次迭代、障碍权重 50000。`forbidden_radius` 和膨胀 `radius` 独立配置，不从机器人半径推导。
 
 ## 参数核对
 

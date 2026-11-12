@@ -14,6 +14,6 @@ Json state(const RobotState &state);
 void event(Json fields) noexcept;
 void map(Json fields, std::shared_ptr<const perception::OccupancyMap> map) noexcept;
 void plan(Json fields, const planner::LocalPlanResult &result,
-          const std::vector<Eigen::Vector3d> &global_path) noexcept;
+          const std::vector<Position3D> &global_path) noexcept;
 void health(double stamp, std::uint64_t clock_epoch = 0) noexcept;
 } // namespace navapex::replay

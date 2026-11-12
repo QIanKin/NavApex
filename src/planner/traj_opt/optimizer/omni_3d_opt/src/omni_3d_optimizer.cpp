@@ -119,6 +119,13 @@ Omni_3d_Optimizer::Omni_3d_Optimizer(Omni3DParams c,
                                      : param_(std::move(c))
 {
     state_.input = std::move(input);
+    if (state_.input->robot_)
+    {
+        const auto &limits = state_.input->robot_->limits();
+        param_.max_velocity = std::min(param_.max_velocity, limits.max_linear_velocity);
+        param_.max_acceleration = std::min(param_.max_acceleration, limits.max_linear_acceleration);
+        param_.max_jerk = std::min(param_.max_jerk, limits.max_jerk);
+    }
     LOGD(OPTIMIZER_TAG) << "create omni_3d_optimizer success";
 }
 
@@ -172,9 +179,9 @@ bool Omni_3d_Optimizer::initializePlanning()
     auto initial = minco_.getTraj();
     state_.normal_planes.reserve(state_.input->inner_points.cols());
     Eigen::Matrix3Xd guide(3, state_.input->inner_points.cols() + 2);
-    guide.col(0) = state_.input->start.position;
+    guide.col(0) = state_.input->start.q;
     guide.middleCols(1, state_.input->inner_points.cols()) = state_.input->inner_points;
-    guide.col(guide.cols() - 1) = state_.input->goal.position;
+    guide.col(guide.cols() - 1) = state_.input->goal.q;
     for (int k = 0; k < state_.input->inner_points.cols(); ++k)
     {
         Eigen::Vector3d t = initial[k].getVel(initial[k].getDuration());

@@ -76,18 +76,12 @@ HH:MM:SS mmm(pid)I/replay: epoch_ns=… seq=… channel=replay … | {JSON}
 
 地图压缩和大轨迹 JSON 编码在现有 g3log sink 线程执行。调用线程只捕获不可变地图和轨迹快照；日志队列维持数量及内存预算，超过预算计入 dropped。后台日志故障不抛入规划求解。
 
-## 验证命令
+## 工作流程验证
 
 ```bash
-python3 -m unittest discover -s tools/log_viewer -p 'test_*.py' -v
-node --check tools/log_viewer/dist/app.js  # 可选开发检查，运行播放器不需要 Node
-
-cmake -S . -B build-replay -DCMAKE_BUILD_TYPE=Release \
-  -DNAVAPEX_BUILD_REPLAY_TESTS=ON -DNAVAPEX_BUILD_PLANNER_TESTS=ON
-cmake --build build-replay -j2
-ctest --test-dir build-replay --output-on-failure
-# C++ 序列化测试产生的演示日志，包含失败帧及未采用帧
-python3 tools/log_viewer/main.py build-replay/src/replay-fixture/*.log*
+./ros2_test/run.sh
+# 导航完成后打开播放器，导入 log/ 下的实际运行日志。
+python3 tools/log_viewer/main.py
 ```
 
-测试覆盖全范围栅格无损还原、后台编码、队列/编码错误计数、轮转元数据、重复/乱序导入、精确地图关联、前后跳帧一致、多项式分段时间、时间重置、损坏/截断数据、旧文本及 HTTP 上传/解码。
+验证统一使用 ROS 2 完整工作流程产生的日志，检查定位、感知地图、规划结果和实际控制指令的关联与回放。

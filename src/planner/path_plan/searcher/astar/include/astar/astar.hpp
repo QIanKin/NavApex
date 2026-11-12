@@ -30,6 +30,8 @@ private:
 
     bool initializeSearch();
 
+    Eigen::Vector3d toSearchPosition(const Position3D &position) const;
+
     Eigen::Vector3d positionOf(const Eigen::Vector3i &index) const;
 
     int address(const Eigen::Vector3i &index) const;

@@ -1,4 +1,21 @@
 {
   "shape": "circle",
-  "radius": 0.125
+  "planner_type": "diff",
+  "radius": 0.125,
+  "sensors": {
+    "lidar2d": {
+      "x": -0.032,
+      "y": 0.0,
+      "yaw": 0.0,
+      "inf_is_free": true,
+      "self_filter_padding": 0.02
+    }
+  },
+  "limits": {
+    "max_linear_velocity": 0.5,
+    "max_linear_acceleration": 1.0,
+    "max_angular_velocity": 1.0,
+    "max_angular_acceleration": 1.5,
+    "max_jerk": 20.0
+  }
 }

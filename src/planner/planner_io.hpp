@@ -12,15 +12,14 @@ namespace navapex::planner
 struct GlobalPlanInput
 {
     std::shared_ptr<const perception::OccupancyMap> map;
-    Pose2D start;
-    Pose2D goal;
+    Pose3D start;
+    Pose3D goal;
 };
 
 struct GlobalPlanResult
 {
     bool success = false;
-    // 几何位置 (x, y, z)，二维规划中 z = 0；终点 yaw 来自 GlobalPlanInput::goal。
-    std::vector<Eigen::Vector3d> path;
+    std::vector<Position3D> path;
 };
 
 struct LocalPlanInput

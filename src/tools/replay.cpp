@@ -67,9 +67,9 @@ bool enabled() noexcept { return planner_tools::logEnabled(planner_tools::LogLev
 
 Json state(const RobotState &value)
 {
-    auto pose = toPose2D(value.pose);
+    auto pose = value.pose.toPlanar();
     const auto &q = value.pose.orientation;
-    return {{"stamp", value.stamp}, {"pose", {pose.x, pose.y, pose.yaw}},
+    return {{"stamp", value.stamp}, {"pose", {pose.position.x, pose.position.y, pose.yaw}},
             {"z", value.pose.position.z}, {"quaternion_wxyz", {q.w, q.x, q.y, q.z}},
             {"velocity", {value.twist.linear.x, value.twist.linear.y, value.twist.angular.z}},
             {"velocity_frame", "base"}};
@@ -116,12 +116,12 @@ void map(Json fields, std::shared_ptr<const perception::OccupancyMap> value) noe
 }
 
 void plan(Json fields, const planner::LocalPlanResult &result,
-          const std::vector<Eigen::Vector3d> &global_path) noexcept
+          const std::vector<Position3D> &global_path) noexcept
 {
     if (!enabled()) return;
     try
     {
-        auto bytes = 4096 + fields.dump().size() + global_path.size() * sizeof(Eigen::Vector3d) +
+        auto bytes = 4096 + fields.dump().size() + global_path.size() * sizeof(Position3D) +
             result.trajectory.getPieceNum() * 256;
         planner_tools::logReplay([fields = std::move(fields), result, global_path]() mutable
         {
@@ -133,7 +133,7 @@ void plan(Json fields, const planner::LocalPlanResult &result,
             fields["trajectory"] = trajectory(result.trajectory);
             fields["global_path_axes"] = {"x", "y", "z"};
             fields["global_path"] = Json::array();
-            for (const auto &p : global_path) fields["global_path"].push_back({p.x(), p.y(), p.z()});
+            for (const auto &p : global_path) fields["global_path"].push_back({p.x, p.y, p.z});
             return fields.dump();
         }, bytes);
     }

@@ -27,8 +27,8 @@ const AStarParams &AStar::param() const
 bool AStar::initializeSearch()
 {
     const auto &input = *input_;
-    Eigen::Vector3d start(input.start.x, input.start.y, input.start.z);
-    Eigen::Vector3d goal(input.goal.x, input.goal.y, input.goal.z);
+    const auto start = toSearchPosition(input.start);
+    const auto goal = toSearchPosition(input.goal);
     auto space = is_3d_ ? perception::Space::Spatial : perception::Space::Planar;
     if (!input.map || input.map->space() != space || !start.allFinite() || !goal.allFinite())
     {
@@ -39,10 +39,9 @@ bool AStar::initializeSearch()
     if (!std::isfinite(resolution_) || resolution_ <= 0 ||
         !std::isfinite(input.radius) || input.radius < 0 ||
         (input.ignore_goal_obstacles &&
-         (!std::isfinite(input.goal_ignore_radius) || input.goal_ignore_radius <= 0)) ||
-        (!is_3d_ && start.z() != goal.z()))
+         (!std::isfinite(input.goal_ignore_radius) || input.goal_ignore_radius <= 0)))
     {
-        LOGE(SEARCHER_TAG) << "invalid resolution, radius, goal ignore radius or different planar endpoint heights";
+        LOGE(SEARCHER_TAG) << "invalid resolution, radius or goal ignore radius";
         return false;
     }
 
@@ -119,6 +118,12 @@ bool AStar::initializeSearch()
     return true;
 }
 
+Eigen::Vector3d AStar::toSearchPosition(const Position3D &position) const
+{
+    // 二维搜索只使用 x、y；输入高度不参与校验、距离计算或输出路径。
+    return {position.x, position.y, is_3d_ ? position.z : 0};
+}
+
 Eigen::Vector3d AStar::positionOf(const Eigen::Vector3i &index) const
 {
     return origin_ + index.cast<double>() * resolution_;
@@ -144,7 +149,7 @@ double AStar::heuristic(const Eigen::Vector3i &index) const
 
 bool AStar::footprintFree(const Eigen::Vector3d &position, bool allow_goal_relaxation) const
 {
-    Eigen::Vector3d goal(input_->goal.x, input_->goal.y, input_->goal.z);
+    const auto goal = toSearchPosition(input_->goal);
     bool ignore_obstacles = allow_goal_relaxation && input_->ignore_goal_obstacles &&
         (position - goal).squaredNorm() <= input_->goal_ignore_radius * input_->goal_ignore_radius;
     int radius = static_cast<int>(std::ceil(input_->radius / resolution_));
@@ -248,14 +253,17 @@ SearchResult AStar::search()
         if (entry.id == last_id)
         {
             for (int id = last_id; id >= 0; id = nodes_[id].parent)
-                result.path.push_back(positionOf(unpack(id)));
+                result.path.push_back(Position3D::fromEigen(positionOf(unpack(id))));
             std::reverse(result.path.begin(), result.path.end());
-            Eigen::Vector3d start(input_->start.x, input_->start.y, input_->start.z);
-            Eigen::Vector3d goal(input_->goal.x, input_->goal.y, input_->goal.z);
-            if (result.path.front() != start)
-                result.path.insert(result.path.begin(), start);
-            if ((result.path.back() - goal).squaredNorm() > 0)
-                result.path.push_back(goal);
+            const auto start = toSearchPosition(input_->start);
+            const auto goal = toSearchPosition(input_->goal);
+            const auto first = Position3D::fromEigen(start);
+            const auto last = Position3D::fromEigen(goal);
+            if (result.path.front().x != first.x || result.path.front().y != first.y || result.path.front().z != first.z)
+                result.path.insert(result.path.begin(), first);
+            const auto delta = result.path.back().toEigen() - goal;
+            if (delta.squaredNorm() > 0)
+                result.path.push_back(last);
             result.success = true;
             LOGI(SEARCHER_TAG) << "A* success points=" << result.path.size()
                                << " elapsed_ms=" << elapsed();

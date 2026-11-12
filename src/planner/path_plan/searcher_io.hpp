@@ -19,7 +19,7 @@ struct SearchInput
 struct SearchResult
 {
     bool success = false;
-    std::vector<Eigen::Vector3d> path;
+    std::vector<Position3D> path;
 };
 
 } // namespace navapex::path_plan

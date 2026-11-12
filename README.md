@@ -17,27 +17,32 @@ g3log 通过 Git submodule 从官方仓库 `KjellKod/g3log` 引入，目录为
 git submodule update --init --recursive
 ```
 
-在项目根目录构建核心库并运行规划器测试：
+在项目根目录构建核心库：
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNAVAPEX_BUILD_PLANNER_TESTS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
-ctest --test-dir build --output-on-failure
 ```
+
+完整工作流程测试统一通过 `ros2_test` 运行，覆盖感知、全局规划、局部规划和控制闭环：
+
+```bash
+./ros2_test/run.sh
+```
+
+在 RViz 中设置目标即可开始导航；无界面运行和参数说明见 [ROS 2 工作流程](ros2_test/README.md)。
 
 配置只在所属模块下维护：
 
-- `src/robot_model/config/robot.json`：机器人形状和尺寸。
-- `src/perception/config/lidar2d.json`：感知与局部地图参数。
+- `src/robot_model/config/robot.json`：机器人形状、尺寸、雷达安装位姿及雷达参数、运动能力上限，以及 `planner_type`（默认 `diff`）。
+- `src/perception/config/lidar2d.json`：感知与局部地图参数；雷达安装位姿由机器人模型提供。
 - `src/planner/path_plan/config/astar.json`：路径搜索参数。
 - `src/planner/traj_opt/config/`：轨迹优化参数。
-- `src/planner/config/planner.json`：规划模式 `type` 与规划、控制参数。
+- `src/planner/config/planner.json`：Planner 自身的局部规划、旋转控制与运动限制参数。
 - `ros2_test/config/navapex.yaml`：ROS 接入与仿真参数。
 - `ros2_test/config/global_map.json`：仿真全局地图参数，独立于感知配置。
 
-`Planner(robot)` 固定读取 `src/planner/config/planner.json`，将 `type` 保存到 `PlannerParams::type`。
-当前支持 `"type": "diff"`，选择 `astar2d` 搜索和 `diff` 优化器；调用方不再传入类型。
+应用入口通过 params 中的 `PlannerConfig::defaultConfig()` 固定加载规划参数，应用初始化根据 RobotModel 的 `planner_type` 选择实现，直接通过 `DiffPlanner(robot, config.planner)` 构造规划器。当前默认 `diff`，使用 `astar2d` 与 `diff` 优化器。
+`base_planner.hpp` 定义 `Planner` 抽象接口，`planGlobal()` 和 `planLocal()` 由 `DiffPlanner` 实现；具体实现仍保留在 `planner.hpp/.cpp`，方便 review。
 全局和局部规划复用同一个搜索器，每次搜索前更新同一份 `SearchInput` 的起点、终点、地图和半径。
-内层算法参数仍由搜索器和优化器读取各自模块的配置。
-
-核心模块自行读取本模块源目录的配置，不支持外部配置路径注入。修改核心 JSON 后重启生效；仿真通过 `./ros2_test/run.sh` 更新地图和 ROS 配置后启动。
+配置文件位置由代码固定，配置内容仍按职责分属各模块；修改 JSON 后重启生效。
