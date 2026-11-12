@@ -99,12 +99,12 @@ ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
 | 感知时间匹配、栅格和膨胀 | `src/perception/config/lidar2d.json` |
 | 路径搜索 | `src/planner/path_plan/config/astar.json` |
 | 差速轨迹优化 | `src/planner/traj_opt/config/diff.json` |
-| 局部规划、旋转及运动限制 | `src/planner/config/planner.json` |
+| 局部规划、旋转及运动限制 | `src/planner/plan_manage/config/planner.json` |
 | 轨迹跟踪速度上限、位置增益、横向增益、前瞻距离 | `src/planner/controller/config/tracker.json` |
 | ROS 话题、调度频率、输入超时和仿真目标 | `ros2_test/config/navapex.yaml` |
 | 仿真全局地图分辨率和禁行圈 | `ros2_test/config/global_map.json` |
 
-ROS 层通过 params 中的 `PlannerConfig::defaultConfig()` 固定读取 `src/planner/config/planner.json`，在节点初始化时根据 RobotModel 的 `planner_type` 选择实现，直接通过 `DiffPlanner(robot, config.planner)` 构造规划器；`planner_type` 在 `src/robot_model/config/robot.json` 中配置，默认 `diff`，对应 `DiffPlanner`、`astar2d` 搜索与 `diff` 优化器。配置路径不可从 ROS 参数或配置文件覆盖。
+ROS 层通过 params 中的 `PlannerConfig::defaultConfig()` 固定读取 `src/planner/plan_manage/config/planner.json`，在节点初始化时根据 RobotModel 的 `planner_type` 选择实现，直接通过 `DiffPlanner(robot, config.planner)` 构造规划器；`planner_type` 在 `src/robot_model/config/robot.json` 中配置，默认 `diff`，对应 `DiffPlanner`、`astar2d` 搜索与 `diff` 优化器。配置路径不可从 ROS 参数或配置文件覆盖。
 
 `ros2_test` 不保存核心参数副本。全局地图保留从 world 静态碰撞几何生成的流程，独立读取 `ros2_test/config/global_map.json`，不读取感知配置。各模块按固定位置读取自己的配置，修改 JSON 后重启即可生效；重新执行启动脚本会在全局地图配置或 world 改动时重新生成全局地图。修改 ROS YAML 后也通过启动脚本重新安装。
 

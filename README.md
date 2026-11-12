@@ -38,11 +38,11 @@ cmake --build build -j2
 - `src/perception/config/lidar2d.json`：感知与局部地图参数；雷达安装位姿由机器人模型提供。
 - `src/planner/path_plan/config/astar.json`：路径搜索参数。
 - `src/planner/traj_opt/config/`：轨迹优化参数。
-- `src/planner/config/planner.json`：Planner 自身的局部规划、旋转控制与运动限制参数。
+- `src/planner/plan_manage/config/planner.json`：Planner 自身的局部规划、旋转控制与运动限制参数。
 - `ros2_test/config/navapex.yaml`：ROS 接入与仿真参数。
 - `ros2_test/config/global_map.json`：仿真全局地图参数，独立于感知配置。
 
 应用入口通过 params 中的 `PlannerConfig::defaultConfig()` 固定加载规划参数，应用初始化根据 RobotModel 的 `planner_type` 选择实现，直接通过 `DiffPlanner(robot, config.planner)` 构造规划器。当前默认 `diff`，使用 `astar2d` 与 `diff` 优化器。
-`base_planner.hpp` 定义 `Planner` 抽象接口，`planGlobal()` 和 `planLocal()` 由 `DiffPlanner` 实现；具体实现仍保留在 `planner.hpp/.cpp`，方便 review。
+`planner/plan_manage/base_planner.hpp` 定义 `Planner` 抽象接口，`planGlobal()` 和 `planLocal()` 由 `DiffPlanner` 实现，代码位于 `planner/plan_manage/diff_planner.hpp/.cpp`。
 全局和局部规划复用同一个搜索器，每次搜索前更新同一份 `SearchInput` 的起点、终点、地图和半径。
 配置文件位置由代码固定，配置内容仍按职责分属各模块；修改 JSON 后重启生效。

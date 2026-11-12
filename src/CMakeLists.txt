@@ -136,7 +136,9 @@ set_target_properties(planner_searcher PROPERTIES EXPORT_NAME searcher)
 target_link_libraries(planner_searcher PUBLIC planner::search_params planner::map PRIVATE planner::astar)
 target_compile_options(planner_searcher PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(planner_core STATIC planner/planner.cpp planner/params/planner_params.cpp)
+add_library(planner_core STATIC
+  planner/plan_manage/diff_planner.cpp
+  planner/plan_manage/params/planner_params.cpp)
 add_library(planner::core ALIAS planner_core)
 set_target_properties(planner_core PROPERTIES EXPORT_NAME core)
 target_link_libraries(planner_core PUBLIC planner::optimizer planner::searcher planner::esdf planner::robot_model
@@ -175,10 +177,11 @@ install(DIRECTORY perception/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/perception
 install(DIRECTORY robot_model/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/robot_model
   FILES_MATCHING PATTERN "*.hpp")
 install(FILES tools/log.hpp tools/replay.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/tools)
-install(FILES planner/base_planner.hpp planner/planner.hpp planner/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner)
+install(FILES planner/plan_manage/base_planner.hpp planner/plan_manage/diff_planner.hpp
+  planner/plan_manage/planner_io.hpp DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/plan_manage)
 install(DIRECTORY planner/controller/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/controller
   FILES_MATCHING PATTERN "*.hpp")
-install(DIRECTORY planner/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/params
+install(DIRECTORY planner/plan_manage/params/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/planner/plan_manage/params
   FILES_MATCHING PATTERN "*.hpp")
 install(EXPORT PlannerTargets NAMESPACE planner:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/planner)
 file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/plannerConfig.cmake CONTENT
@@ -188,7 +191,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" DESTINATION ${CMAKE_INSTA
 install(FILES tools/g3log/LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/licenses RENAME g3log-LICENSE)
 install(DIRECTORY planner/traj_opt/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/traj_opt
   FILES_MATCHING PATTERN "*.json")
-install(DIRECTORY planner/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/planner
+install(DIRECTORY planner/plan_manage/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/plan_manage
   FILES_MATCHING PATTERN "*.json")
 install(DIRECTORY planner/controller/config/ DESTINATION ${CMAKE_INSTALL_DATADIR}/planner/config/controller
   FILES_MATCHING PATTERN "*.json")

@@ -6,7 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <deque>
-#include <planner/planner.hpp>
+#include <planner/plan_manage/diff_planner.hpp>
 #include <planner/controller/trajectory_tracker.hpp>
 #include <tools/log.hpp>
 #include <tools/replay.hpp>

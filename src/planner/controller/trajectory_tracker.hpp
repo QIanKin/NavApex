@@ -1,7 +1,7 @@
 #pragma once
 
-#include <planner/params/planner_params.hpp>
-#include <planner/planner_io.hpp>
+#include <planner/plan_manage/params/planner_params.hpp>
+#include <planner/plan_manage/planner_io.hpp>
 #include <robot_model/robot_model.hpp>
 
 namespace navapex::planner
